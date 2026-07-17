@@ -1,0 +1,4 @@
+pyperclip
+keyboard
+pystray
+Pillow

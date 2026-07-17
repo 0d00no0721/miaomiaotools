@@ -1,0 +1,17 @@
+# Build artifacts
+dist/
+build/
+*.spec
+__pycache__/
+*.pyc
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+Thumbs.db
+desktop.ini
+
+# Runtime data
+presets.json
