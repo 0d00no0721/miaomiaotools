@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         USTC LLM 用量统计与可视化
 // @namespace    https://llm.ustc.edu.cn/
-// @version      2.2.0
+// @version      2.2.2
 // @description  在线统计当天用量 + 本地持久化每日快照，形成历史累计柱状图
 // @author       0d000721
 // @match        https://llm.ustc.edu.cn/*
@@ -261,7 +261,7 @@
 
     #ustc-usage-drawer {
       position: fixed; z-index: 2147483001; top: 0; right: 0; bottom: 0;
-      width: 720px; max-width: 96vw; background: #0f172a; color: #e2e8f0;
+      width: 920px; max-width: 98vw; background: #0f172a; color: #e2e8f0;
       box-shadow: -8px 0 40px rgba(0,0,0,.5);
       transform: translateX(100%); transition: transform .25s ease;
       display: flex; flex-direction: column;
@@ -406,29 +406,95 @@
   // 按半小时粒度 + 模型 聚合明细日志,返回 { slots, models, matrix }
   // matrix[modelName][slotIndex] = total_tokens
   function buildHalfHourSeries(items) {
-    const slotMap = {};   // slotKey -> {label}
+    const p = (n) => String(n).padStart(2, '0');
+    const now = Date.now();
+    const windowStart = now - 24 * 3600 * 1000;
+
+    // 对齐到半小时边界
+    const startD = new Date(windowStart);
+    const startMin = startD.getMinutes() < 30 ? 0 : 30;
+    const windowStartAligned = new Date(startD);
+    windowStartAligned.setMinutes(startMin, 0, 0);
+
+    // 生成完整半小时槽序列(大约48个)
+    const allSlots = [];
+    let cur = windowStartAligned.getTime();
+    while (cur <= now) {
+      const d = new Date(cur);
+      const hh = p(d.getHours());
+      const mm = p(d.getMinutes());
+      const slotKey = todayStr(d) + ' ' + hh + ':' + mm;
+      const label = p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + hh + ':' + mm;
+      allSlots.push({ slotKey, label, ts: cur, totalTokens: 0, byModel: {} });
+      cur += 30 * 60 * 1000;
+    }
+
     const modelSet = new Set();
-    const data = {};      // model -> { slotKey -> tokens }
+    // 填充数据
     items.forEach((it) => {
       const t = new Date(it.started_at);
       if (isNaN(t)) return;
-      const p = (n) => String(n).padStart(2, '0');
-      const hh = p(t.getHours());
-      const mm = t.getMinutes() < 30 ? '00' : '30';
-      // 槽位键(唯一,可排序): YYYY-MM-DD HH:MM
-      const slotKey = todayStr(t) + ' ' + hh + ':' + mm;
-      // 显示标签(跨天时带日期): MM-DD HH:MM
-      const label = p(t.getMonth() + 1) + '-' + p(t.getDate()) + ' ' + hh + ':' + mm;
+      const ts = t.getTime();
+      if (ts < windowStartAligned.getTime() || ts > now) return;
+      // 定位所属槽
+      const idx = Math.floor((ts - windowStartAligned.getTime()) / (30 * 60 * 1000));
+      if (idx < 0 || idx >= allSlots.length) return;
+      const slot = allSlots[idx];
       const model = it.model_name || it.model || '未知';
       modelSet.add(model);
-      if (!slotMap[slotKey]) slotMap[slotKey] = { label: label };
-      (data[model] = data[model] || {});
-      data[model][slotKey] = (data[model][slotKey] || 0) + (Number(it.total_tokens) || 0);
+      const tk = Number(it.total_tokens) || 0;
+      slot.byModel[model] = (slot.byModel[model] || 0) + tk;
+      slot.totalTokens += tk;
     });
-    const slots = Object.keys(slotMap).sort();
-    const labels = slots.map((s) => slotMap[s].label);
+
     const models = Array.from(modelSet).sort();
-    return { slots, labels, models, data };
+
+    // 合并连续空闲槽 -> segments
+    const segments = [];
+    let idleRun = null;
+    allSlots.forEach((slot, idx) => {
+      if (slot.totalTokens === 0) {
+        if (!idleRun) idleRun = { startIdx: idx, endIdx: idx, startLabel: slot.label, endTs: slot.ts };
+        else { idleRun.endIdx = idx; idleRun.endTs = slot.ts; }
+      } else {
+        if (idleRun) { segments.push({ type: 'idle', data: idleRun }); idleRun = null; }
+        segments.push({ type: 'active', slot: slot, idx: idx });
+      }
+    });
+    if (idleRun) segments.push({ type: 'idle', data: idleRun });
+
+    // 计算空闲时长文案
+    function fmtIdleSpan(ms) {
+      const m = Math.round(ms / 60000);
+      if (m < 60) return m + '分钟';
+      return (m / 60).toFixed(1) + '小时';
+    }
+
+    // 组装 labels + 每模型每段数据 + 空闲区间(用于 markArea)
+    const labels = [];
+    const idleRanges = [];
+    const segData = {};   // model -> number[]  (对齐 segments)
+    models.forEach((m) => { segData[m] = []; });
+
+    segments.forEach((seg) => {
+      if (seg.type === 'idle') {
+        const startSlot = allSlots[seg.data.startIdx];
+        const endSlot = allSlots[seg.data.endIdx];
+        const spanMs = (endSlot.ts + 30 * 60 * 1000) - startSlot.ts;
+        const label = startSlot.label.split(' ')[1] + ' ~ ' + (function () {
+          const ed = new Date(endSlot.ts + 30 * 60 * 1000);
+          return p(ed.getHours()) + ':' + p(ed.getMinutes());
+        })() + '\n(空闲 ' + fmtIdleSpan(spanMs) + ')';
+        labels.push(label);
+        idleRanges.push({ name: '空闲', label: label.replace('\n', ' ') });
+        models.forEach((m) => { segData[m].push(0); });
+      } else {
+        labels.push(seg.slot.label);
+        models.forEach((m) => { segData[m].push(seg.slot.byModel[m] || 0); });
+      }
+    });
+
+    return { labels, models, segData, idleRanges, segments };
   }
 
   // 统一图表初始化:延迟一帧 + 主动 resize,避免抽屉/SPA 场景尺寸为 0 导致不显示
@@ -512,14 +578,25 @@
           name: m,
           type: 'bar',
           stack: 'time',
-          data: agg.slots.map((s) => agg.data[m] && agg.data[m][s] ? agg.data[m][s] : 0),
+          data: agg.segData[m],
           itemStyle: { color: palette[i % palette.length] },
         }));
+        // 空闲区间用 markArea 灰色高亮(以 dataIndex 定位)
+        const markAreas = [];
+        let segIndex = 0;
+        agg.segments.forEach((seg) => {
+          if (seg.type === 'idle') {
+            markAreas.push([{ itemStyle: { color: 'rgba(148,163,184,0.12)' }, xAxis: segIndex }, { xAxis: segIndex }]);
+          }
+          segIndex++;
+        });
+        if (markAreas.length) series[series.length - 1].markArea = { silent: true, data: markAreas };
+
         makeChart(cT, {
           tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
           legend: { top: 4, textStyle: { color: '#cbd5e1' }, type: 'scroll' },
-          grid: { left: 8, right: 8, top: 40, bottom: 6, containLabel: true },
-          xAxis: { type: 'category', data: agg.labels, axisLabel: { color: '#94a3b8', rotate: 45 } },
+          grid: { left: 8, right: 8, top: 40, bottom: 20, containLabel: true },
+          xAxis: { type: 'category', data: agg.labels, axisLabel: { color: '#94a3b8', rotate: 45, interval: 0 } },
           yAxis: { type: 'value', axisLabel: { color: '#94a3b8' } },
           series: series,
         });
