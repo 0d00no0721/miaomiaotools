@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         USTC LLM 用量统计与可视化
 // @namespace    https://llm.ustc.edu.cn/
-// @version      2.2.2
+// @version      2.3.2
 // @description  在线统计当天用量 + 本地持久化每日快照，形成历史累计柱状图
 // @author       0d000721
 // @match        https://llm.ustc.edu.cn/*
@@ -98,12 +98,14 @@
   async function fetchAllLogs(onProgress) {
     const first = await api('/api/usage/logs?page=1&page_size=50');
     const pages = first.pages || 1;
+    const total = first.total || 0;
     let items = (first.items || []).slice();
     for (let p = 2; p <= pages; p++) {
       if (onProgress) onProgress(p, pages);
       const r = await api('/api/usage/logs?page=' + p + '&page_size=50');
       items = items.concat(r.items || []);
     }
+    console.log('[USTC] fetchAllLogs: 接口 total=' + total + ' pages=' + pages + ' 实际拉到=' + items.length + ' 条');
     return items;
   }
 
@@ -302,6 +304,14 @@
     #ustc-usage-drawer .toolbar button.ghost { background: #1e293b; color: #cbd5e1; }
     #ustc-usage-drawer .toolbar button:disabled { opacity: .5; cursor: default; }
     #ustc-usage-drawer .toolbar button.danger { background: #7f1d1d; }
+    #ustc-usage-drawer .seg-group { display: inline-flex; gap: 4px; background: #1e293b; border-radius: 8px; padding: 3px; }
+    #ustc-usage-drawer .seg-group button {
+      background: transparent; color: #94a3b8; border: none; cursor: pointer;
+      padding: 5px 10px; border-radius: 6px; font-size: 12px;
+    }
+    #ustc-usage-drawer .seg-group button.active { background: #2563eb; color: #fff; }
+    #ustc-usage-drawer .hist-controls { display: flex; align-items: center; gap: 12px; padding: 12px 20px; border-bottom: 1px solid #1e293b; flex-wrap: wrap; }
+    #ustc-usage-drawer .hist-controls .cap { font-size: 12px; color: #64748b; }
 
     #ustc-usage-drawer .kpis {
       display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; padding: 16px 20px 0;
@@ -356,6 +366,8 @@
   let lastTodaySummary = null;
   let lastTodayModels = [];
   let lastLogItems = [];
+  let histRangeDays = 7;   // 历史展示天数范围(7/15/30)
+  let histMode = 'bar';    // bar=柱状(堆叠) / line=累计折线
 
   /* 标签切换 */
   drawer.querySelectorAll('.tab').forEach((t) => {
@@ -506,7 +518,12 @@
     if (!el.clientHeight) el.style.height = '320px';
     console.log('[USTC debug] makeChart 容器尺寸 w=' + el.clientWidth + ' h=' + el.clientHeight + ' 偏移=' + el.getBoundingClientRect().width + 'x' + el.getBoundingClientRect().height);
     const chart = ec.init(el, null, { renderer: 'canvas' });
-    chart.setOption(option);
+    // 注入动画:折线图从左到右延伸,柱状图从下往上生长
+    const hasLine = (option.series || []).some((s) => (s.type || '').indexOf('line') !== -1);
+    const anim = hasLine
+      ? { animation: true, animationDuration: 1200, animationDurationUpdate: 600, animationEasing: 'linear', animationEasingUpdate: 'linear' }
+      : { animation: true, animationDuration: 900, animationDurationUpdate: 500, animationEasing: 'cubicOut', animationEasingUpdate: 'cubicInOut' };
+    chart.setOption(Object.assign({}, anim, option));
     console.log('[USTC debug] makeChart 实例化后 canvas 数=' + el.querySelectorAll('canvas').length);
     // 用 setTimeout 确保抽屉 transition 完成后再 resize
     setTimeout(() => { try { chart.resize(); } catch (e) { console.warn('[USTC] resize err', e); } }, 350);
@@ -533,39 +550,6 @@
 
     const echarts = window.__ustc_echarts;
     console.log('[USTC debug] echarts ready:', !!echarts, 'models raw count:', (lastTodayModels || []).length, 'models:', lastTodayModels);
-    const models = (lastTodayModels || []).slice().sort((a, b) => (b.total_tokens || 0) - (a.total_tokens || 0));
-
-    // 当日按模型分层设色柱状图
-    const card1 = card('当天各模型 Token（分层设色：输入 / 输出 / 缓存命中）');
-    const c1 = div('chart'); card1.appendChild(c1); body.appendChild(card1);
-    if (echarts && models.length) {
-      makeChart(c1, {
-        tooltip: { trigger: 'axis' },
-        legend: { top: 4, textStyle: { color: '#cbd5e1' } },
-        grid: { left: 8, right: 8, top: 40, bottom: 6, containLabel: true },
-        xAxis: { type: 'category', data: models.map((m) => m.name), axisLabel: { color: '#94a3b8', rotate: 20 } },
-        yAxis: { type: 'value', axisLabel: { color: '#94a3b8' } },
-        series: [
-          { name: '输入', type: 'bar', stack: 't', data: models.map((m) => m.prompt_tokens || 0), itemStyle: { color: '#22c55e' } },
-          { name: '输出', type: 'bar', stack: 't', data: models.map((m) => m.completion_tokens || 0), itemStyle: { color: '#f97316' } },
-          { name: '缓存命中', type: 'bar', stack: 't', data: models.map((m) => m.cache_read_input_tokens || 0), itemStyle: { color: '#06b6d4' } },
-        ],
-      });
-    }
-
-    // 当日各模型请求占比
-    if (models.length) {
-      const card2 = card('当天各模型请求次数占比');
-      const c2 = div('chart'); card2.appendChild(c2); body.appendChild(card2);
-      if (echarts) makeChart(c2, {
-        tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
-        series: [{ type: 'pie', radius: ['40%', '70%'], data: models.map((m) => ({ name: m.name, value: m.request_count || 0 })), label: { color: '#cbd5e1' } }],
-      });
-    } else {
-      const cardE = card('当天各模型');
-      cardE.innerHTML = '<h3>当天各模型</h3><div class="empty">今天暂无调用记录</div>';
-      body.appendChild(cardE);
-    }
 
     // 按时间统计(半小时粒度,按模型分层设色)
     if (lastLogItems && lastLogItems.length) {
@@ -635,24 +619,12 @@
     }
 
     let totalReq = 0, totalTok = 0, totalSpend = 0;
-    const dailyTotal = [];      // 每日总 token
-    const dailyReq = [];        // 每日请求数
-    // 跨天按模型聚合(用于累计分层设色)
-    const modelAcc = {};
+    const firstDay = days[0], lastDay = days[days.length - 1];
     days.forEach((d) => {
-      const day = h[d];
-      const s = day.total || {};
+      const s = h[d].total || {};
       totalReq += Number(s.request_count) || 0;
       totalTok += Number(s.total_tokens) || 0;
       totalSpend += Number(s.spend) || 0;
-      dailyTotal.push({ d: d, v: Number(s.total_tokens) || 0 });
-      dailyReq.push({ d: d, v: Number(s.request_count) || 0 });
-      Object.values(day.byModel || {}).forEach((m) => {
-        (modelAcc[m.name] = modelAcc[m.name] || { name: m.name, total_tokens: 0, request_count: 0, spend: 0 });
-        modelAcc[m.name].total_tokens += Number(m.total_tokens) || 0;
-        modelAcc[m.name].request_count += Number(m.request_count) || 0;
-        modelAcc[m.name].spend += Number(m.spend) || 0;
-      });
     });
 
     setKPIs([
@@ -660,50 +632,100 @@
       { lbl: '累计请求', val: fmtInt(totalReq) },
       { lbl: '累计 Token', val: fmtInt(totalTok) },
       { lbl: '累计费用', val: fmtMoney(totalSpend) },
-      { lbl: '首次记录', val: days[0] },
-      { lbl: '最近记录', val: days[days.length - 1] },
+      { lbl: '首次记录', val: firstDay },
+      { lbl: '最近记录', val: lastDay },
     ]);
 
     const echarts = window.__ustc_echarts;
 
-    // 每日总 token 柱状图
-    const card1 = card('每日总 Token 消耗');
-    const c1 = div('chart'); card1.appendChild(c1); body.appendChild(card1);
-    if (echarts) makeChart(c1, {
-      tooltip: { trigger: 'axis' },
-      grid: { left: 8, right: 8, top: 20, bottom: 6, containLabel: true },
-      xAxis: { type: 'category', data: dailyTotal.map((d) => d.d), axisLabel: { color: '#94a3b8' } },
-      yAxis: { type: 'value', axisLabel: { color: '#94a3b8' } },
-      series: [{ name: '总 Token', type: 'bar', data: dailyTotal.map((d) => d.v), itemStyle: { color: '#3b82f6' } }],
+    // ---- 控制条:范围 + 模式 ----
+    const controls = document.createElement('div');
+    controls.className = 'hist-controls';
+    const rangeGroup = document.createElement('div');
+    rangeGroup.className = 'seg-group';
+    [7, 15, 30].forEach((n) => {
+      const b = document.createElement('button');
+      b.textContent = n + '天';
+      if (histRangeDays === n) b.classList.add('active');
+      b.addEventListener('click', () => { histRangeDays = n; renderHistory(); });
+      rangeGroup.appendChild(b);
+    });
+    const modeGroup = document.createElement('div');
+    modeGroup.className = 'seg-group';
+    const modeBar = document.createElement('button');
+    modeBar.textContent = '柱状图';
+    if (histMode === 'bar') modeBar.classList.add('active');
+    modeBar.addEventListener('click', () => { histMode = 'bar'; renderHistory(); });
+    const modeLine = document.createElement('button');
+    modeLine.textContent = '累计折线';
+    if (histMode === 'line') modeLine.classList.add('active');
+    modeLine.addEventListener('click', () => { histMode = 'line'; renderHistory(); });
+    modeGroup.appendChild(modeBar); modeGroup.appendChild(modeLine);
+
+    controls.appendChild(document.createTextNode('范围'));
+    controls.appendChild(rangeGroup);
+    controls.appendChild(document.createTextNode('模式'));
+    controls.appendChild(modeGroup);
+    body.appendChild(controls);
+
+    // ---- 展示天数 = min(已有天数, 选择) ----
+    const showDays = Math.min(days.length, histRangeDays);
+    const selectedDays = days.slice(-showDays);
+
+    // 模型全集 + 各天各模型 token
+    const modelSet = new Set();
+    selectedDays.forEach((d) => {
+      Object.keys(h[d].byModel || {}).forEach((m) => { modelSet.add(m); });
+    });
+    const models = Array.from(modelSet).sort();
+    const perDay = {};
+    models.forEach((m) => { perDay[m] = {}; });
+    selectedDays.forEach((d) => {
+      const bm = h[d].byModel || {};
+      models.forEach((m) => { perDay[m][d] = Number((bm[m] && bm[m].total_tokens)) || 0; });
     });
 
-    // 每日请求数折线
-    const card2 = card('每日请求次数');
-    const c2 = div('chart'); card2.appendChild(c2); body.appendChild(card2);
-    if (echarts) makeChart(c2, {
-      tooltip: { trigger: 'axis' },
-      grid: { left: 8, right: 8, top: 20, bottom: 6, containLabel: true },
-      xAxis: { type: 'category', data: dailyReq.map((d) => d.d), axisLabel: { color: '#94a3b8' } },
-      yAxis: { type: 'value', axisLabel: { color: '#94a3b8' } },
-      series: [{ name: '请求数', type: 'line', smooth: true, data: dailyReq.map((d) => d.v), areaStyle: { opacity: .15 }, itemStyle: { color: '#f59e0b' } }],
-    });
+    const palette = ['#3b82f6', '#f59e0b', '#22c55e', '#f97316', '#06b6d4', '#8b5cf6', '#ec4899', '#14b8a6', '#eab308', '#ef4444'];
 
-    // 累计按模型(可选显示饼图)
-    const models = Object.values(modelAcc).sort((a, b) => b.total_tokens - a.total_tokens);
-    if (models.length) {
-      const card3 = card('累计各模型 Token 占比');
-      const c3 = div('chart'); card3.appendChild(c3); body.appendChild(card3);
-      if (echarts) makeChart(c3, {
-        tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
-        series: [{ type: 'pie', radius: ['40%', '70%'], data: models.map((m) => ({ name: m.name, value: m.total_tokens })), label: { color: '#cbd5e1' } }],
+    let title, series, yName;
+    if (histMode === 'bar') {
+      title = '每日用量（按模型分层设色 · 最近 ' + showDays + ' 天）';
+      series = models.map((m, i) => ({
+        name: m,
+        type: 'bar',
+        stack: 'day',
+        data: selectedDays.map((d) => perDay[m][d]),
+        itemStyle: { color: palette[i % palette.length] },
+      }));
+      yName = 'Token';
+    } else {
+      title = '累计用量（按模型 · 最近 ' + showDays + ' 天）';
+      series = models.map((m, i) => {
+        let acc = 0;
+        const data = selectedDays.map((d) => { acc += perDay[m][d]; return acc; });
+        return { name: m, type: 'line', smooth: true, data: data, itemStyle: { color: palette[i % palette.length] }, areaStyle: { opacity: 0.06 } };
+      });
+      yName = '累计 Token';
+    }
+
+    const cardChart = card(title);
+    const c = div('chart tall'); cardChart.appendChild(c); body.appendChild(cardChart);
+    if (echarts) {
+      makeChart(c, {
+        tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+        legend: { top: 4, textStyle: { color: '#cbd5e1' }, type: 'scroll' },
+        grid: { left: 8, right: 8, top: 40, bottom: 6, containLabel: true },
+        xAxis: { type: 'category', data: selectedDays, axisLabel: { color: '#94a3b8' } },
+        yAxis: { type: 'value', name: yName, nameTextStyle: { color: '#64748b' }, axisLabel: { color: '#94a3b8' } },
+        series: series,
       });
     }
 
     const note = card('说明');
     note.innerHTML = '<h3>说明</h3><div style="font-size:13px;color:#94a3b8;line-height:1.7;">' +
-      '数据只保存在浏览器本地（Tampermonkey 存储），不上传。<br/>' +
-      '每天首次打开当天页并「刷新并归档」会存下当天快照；同一日多次刷新会覆盖为最新值。<br/>' +
-      '之前未采集的历史无法找回，从今天开始积累。</div>';
+      '数据保存在浏览器本地（Tampermonkey 存储），不上传。<br/>' +
+      '展示天数 = min(已累积天数, 所选范围)。当前显示最近 ' + showDays + ' 天。<br/>' +
+      '「累计折线」为按模型的逐日累加值。之前未采集的历史无法找回。</div>';
     body.appendChild(note);
   }
 
@@ -798,7 +820,7 @@
       // 兜底:若 models 接口返回空,改用今天的访问日志明细按模型聚合
       if (!lastTodayModels || !lastTodayModels.length) {
         const agg = {};
-        todayLogs.forEach((it) => {
+        windowLogs.forEach((it) => {
           const name = it.model_name || it.model || '未知';
           (agg[name] = agg[name] || {
             name: name, request_count: 0, prompt_tokens: 0,
@@ -817,8 +839,9 @@
       // 归档今天快照(打时间戳,覆盖式)
       archiveDay(today, summary, lastTodayModels);
 
-      // 用明细补全昨天/前天的历史快照
-      backfillPastDays(otherLogs);
+      // 用完整明细(最近三天)补全昨天/前天的历史快照
+      // 注意:必须用 logs 全量,而非 otherLogs(否则昨天落在24h窗口内的部分会丢失)
+      backfillPastDays(logs || []);
 
       $('#ustc-prog').style.width = '100%';
       renderActive();
