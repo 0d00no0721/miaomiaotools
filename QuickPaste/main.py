@@ -23,7 +23,7 @@ import ctypes
 
 user32 = ctypes.windll.user32
 # Extra delay for clipboard propagation (increase if paste fails)
-CLIPBOARD_DELAY = 0.15
+CLIPBOARD_DELAY = 0.2
 
 
 # ============================================================
@@ -45,8 +45,37 @@ CONFIG_FILE = os.path.join(APP_DIR, "presets.json")
 
 
 # ============================================================
-# Paste — release modifiers first, then send clean Ctrl+V
+# Paste — release modifiers first, then send clean Ctrl+V via SendInput
 # ============================================================
+
+# SendInput structures and constants
+INPUT_KEYBOARD = 1
+KEYEVENTF_KEYUP = 0x0002
+VK_CONTROL = 0x11
+VK_V = 0x56
+
+
+class KEYBDINPUT(ctypes.Structure):
+    _fields_ = [
+        ("wVk", ctypes.c_ushort),
+        ("wScan", ctypes.c_ushort),
+        ("dwFlags", ctypes.c_ulong),
+        ("time", ctypes.c_ulong),
+        ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong)),
+    ]
+
+
+class INPUT_UNION(ctypes.Union):
+    _fields_ = [("ki", KEYBDINPUT)]
+
+
+class INPUT(ctypes.Structure):
+    _fields_ = [
+        ("type", ctypes.c_ulong),
+        ("union", INPUT_UNION),
+    ]
+
+
 def release_all_modifiers():
     """Release all modifier keys that the user might still be holding.
 
@@ -62,15 +91,39 @@ def release_all_modifiers():
 
 
 def simulate_paste():
-    """Send a clean Ctrl+V to the system.
+    """Send a clean Ctrl+V to the system via SendInput.
 
     1. Release all modifiers (user may still be holding the hotkey combo)
     2. Small delay for the release to propagate
-    3. Use keyboard.send() which internally uses SendInput on Windows
+    3. Use SendInput API directly for maximum reliability
     """
     release_all_modifiers()
     time.sleep(0.05)
-    keyboard.send("ctrl+v", suppress=False)
+
+    # Build Ctrl down, V down, V up, Ctrl up
+    inputs = (INPUT * 4)()
+
+    # Ctrl down
+    inputs[0].type = INPUT_KEYBOARD
+    inputs[0].union.ki.wVk = VK_CONTROL
+    inputs[0].union.ki.dwFlags = 0
+
+    # V down
+    inputs[1].type = INPUT_KEYBOARD
+    inputs[1].union.ki.wVk = VK_V
+    inputs[1].union.ki.dwFlags = 0
+
+    # V up
+    inputs[2].type = INPUT_KEYBOARD
+    inputs[2].union.ki.wVk = VK_V
+    inputs[2].union.ki.dwFlags = KEYEVENTF_KEYUP
+
+    # Ctrl up
+    inputs[3].type = INPUT_KEYBOARD
+    inputs[3].union.ki.wVk = VK_CONTROL
+    inputs[3].union.ki.dwFlags = KEYEVENTF_KEYUP
+
+    user32.SendInput(ctypes.c_uint(4), ctypes.byref(inputs), ctypes.c_int(ctypes.sizeof(INPUT)))
 
 
 # ============================================================
@@ -267,11 +320,11 @@ class QuickPasteApp:
             pyperclip.copy(text)
             time.sleep(CLIPBOARD_DELAY)
 
-            # Simulate Ctrl+V
+            # Simulate Ctrl+V via SendInput
             simulate_paste()
 
             # Restore old clipboard after paste completes
-            time.sleep(0.3)
+            time.sleep(0.5)
             pyperclip.copy(old_clip)
 
         except Exception as e:
