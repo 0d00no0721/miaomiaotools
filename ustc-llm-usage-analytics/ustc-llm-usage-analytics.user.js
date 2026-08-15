@@ -663,11 +663,15 @@
     modeBar.textContent = '柱状图';
     if (histMode === 'bar') modeBar.classList.add('active');
     modeBar.addEventListener('click', () => { histMode = 'bar'; renderHistory(); });
+    const modeDaily = document.createElement('button');
+    modeDaily.textContent = '单日折线';
+    if (histMode === 'daily') modeDaily.classList.add('active');
+    modeDaily.addEventListener('click', () => { histMode = 'daily'; renderHistory(); });
     const modeLine = document.createElement('button');
     modeLine.textContent = '累计折线';
     if (histMode === 'line') modeLine.classList.add('active');
     modeLine.addEventListener('click', () => { histMode = 'line'; renderHistory(); });
-    modeGroup.appendChild(modeBar); modeGroup.appendChild(modeLine);
+    modeGroup.appendChild(modeBar); modeGroup.appendChild(modeDaily); modeGroup.appendChild(modeLine);
 
     controls.appendChild(document.createTextNode('范围'));
     controls.appendChild(rangeGroup);
@@ -705,6 +709,16 @@
         itemStyle: { color: palette[i % palette.length] },
       }));
       yName = 'Token';
+    } else if (histMode === 'daily') {
+      title = '单日用量（按模型 · 最近 ' + showDays + ' 天）';
+      series = models.map((m, i) => ({
+        name: m,
+        type: 'line',
+        smooth: true,
+        data: selectedDays.map((d) => perDay[m][d]),
+        itemStyle: { color: palette[i % palette.length] },
+      }));
+      yName = 'Token';
     } else {
       title = '累计用量（按模型 · 最近 ' + showDays + ' 天）';
       series = models.map((m, i) => {
@@ -732,7 +746,7 @@
     note.innerHTML = '<h3>说明</h3><div style="font-size:13px;color:#94a3b8;line-height:1.7;">' +
       '数据保存在浏览器本地（Tampermonkey 存储），不上传。<br/>' +
       '展示天数 = min(已累积天数, 所选范围)。当前显示最近 ' + showDays + ' 天。<br/>' +
-      '「累计折线」为按模型的逐日累加值。之前未采集的历史无法找回。</div>';
+      '「单日折线」为每天实际用量；「累计折线」为按模型的逐日累加值。之前未采集的历史无法找回。</div>';
     body.appendChild(note);
   }
 
