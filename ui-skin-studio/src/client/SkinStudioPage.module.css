@@ -1,0 +1,335 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px;
+  min-height: 100%;
+}
+
+.header {
+  flex: none;
+}
+
+.title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+
+.gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 16px;
+}
+
+.skinCard {
+  display: flex;
+  flex-direction: column;
+  border: 2px solid var(--dsw-alias-border-l2);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--dsw-alias-bg-layer-1);
+  transition: border-color 0.15s ease;
+}
+
+.skinCard:hover {
+  border-color: var(--dsw-alias-state-business-primary);
+}
+
+.skinCardActive {
+  border-color: var(--dsw-alias-state-business-primary);
+}
+
+.skinCardPreview {
+  width: 100%;
+  height: 120px;
+  overflow: hidden;
+  background: var(--dsw-alias-bg-layer-2);
+}
+
+.skinCardImage {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.skinCardPlaceholder {
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(135deg, var(--dsw-alias-bg-layer-2), var(--dsw-alias-bg-layer-3));
+}
+
+.skinCardInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px 4px;
+}
+
+.skinCardName {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--dsw-alias-label-primary);
+}
+
+.skinCardDesc {
+  font-size: 12px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.skinCardBadge {
+  font-size: 11px;
+  color: var(--dsw-alias-state-business-primary);
+  font-weight: 500;
+}
+
+.skinCardActions {
+  display: flex;
+  gap: 6px;
+  padding: 6px 12px 12px;
+}
+
+.smallButton {
+  padding: 4px 10px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 6px;
+  background: transparent;
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+  transition: background 0.13s ease, border-color 0.13s ease;
+}
+
+.smallButton:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  border-color: var(--dsw-alias-state-business-primary);
+}
+
+.smallButtonDanger {
+  padding: 4px 10px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 6px;
+  background: transparent;
+  font-size: 12px;
+  color: var(--dsw-alias-state-error-primary);
+  cursor: pointer;
+  transition: background 0.13s ease;
+}
+
+.smallButtonDanger:hover {
+  background: var(--dsw-alias-interactive-bg-hover-danger);
+}
+
+.newSkinCard {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 180px;
+  border: 2px dashed var(--dsw-alias-border-l2);
+  border-radius: 12px;
+  background: transparent;
+  font-size: 14px;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+
+.newSkinCard:hover {
+  border-color: var(--dsw-alias-state-business-primary);
+  color: var(--dsw-alias-state-business-primary);
+}
+
+.newSkinPlus {
+  font-size: 28px;
+  font-weight: 300;
+  line-height: 1;
+}
+
+.editor {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.fieldLabel {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.textInput {
+  padding: 8px 12px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-layer-1);
+  font-size: 14px;
+  color: var(--dsw-alias-label-primary);
+  outline: none;
+  transition: border-color 0.13s ease;
+}
+
+.textInput:focus {
+  border-color: var(--dsw-alias-state-business-primary);
+}
+
+.regionTabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--dsw-alias-border-l2);
+}
+
+.regionTab {
+  padding: 8px 16px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  font-size: 13px;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+  transition: color 0.13s ease;
+}
+
+.regionTab:hover {
+  color: var(--dsw-alias-label-primary);
+}
+
+.regionTabActive {
+  color: var(--dsw-alias-state-business-primary);
+  border-bottom-color: var(--dsw-alias-state-business-primary);
+}
+
+.regionConfig {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 10px;
+  background: var(--dsw-alias-bg-layer-1);
+}
+
+.imageRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.imagePreview {
+  width: 80px;
+  height: 50px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid var(--dsw-alias-border-l2);
+}
+
+.imagePlaceholder {
+  width: 80px;
+  height: 50px;
+  border-radius: 6px;
+  border: 1px dashed var(--dsw-alias-border-l2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.uploadButton {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 14px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 6px;
+  background: var(--dsw-alias-bg-layer-2);
+  font-size: 13px;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+  transition: background 0.13s ease;
+}
+
+.uploadButton:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.fileInput {
+  display: none;
+}
+
+.clearButton {
+  padding: 6px 14px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 6px;
+  background: transparent;
+  font-size: 13px;
+  color: var(--dsw-alias-state-error-primary);
+  cursor: pointer;
+}
+
+.clearButton:hover {
+  background: var(--dsw-alias-interactive-bg-hover-danger);
+}
+
+.editorActions {
+  display: flex;
+  gap: 10px;
+}
+
+.primaryButton {
+  padding: 8px 24px;
+  border: none;
+  border-radius: 8px;
+  background: var(--dsw-alias-state-business-primary);
+  font-size: 14px;
+  font-weight: 500;
+  color: #fff;
+  cursor: pointer;
+  transition: opacity 0.13s ease;
+}
+
+.primaryButton:hover {
+  opacity: 0.9;
+}
+
+.secondaryButton {
+  padding: 8px 24px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+  background: transparent;
+  font-size: 14px;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+  transition: background 0.13s ease;
+}
+
+.secondaryButton:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.toast {
+  position: fixed;
+  bottom: 40px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 8px 20px;
+  border-radius: 8px;
+  background: var(--dsw-alias-toast-bg);
+  color: #fff;
+  font-size: 13px;
+  z-index: 100;
+  pointer-events: none;
+  animation: fadeIn 0.2s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
