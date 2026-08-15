@@ -1,0 +1,5 @@
+# deskpet bundle patch：向 web 组合挂载 deskpet（Node half 服务宠物静态素材，
+# client half 由 dsh.client 内核经 /plugins/deskpet/client.js 挂载渲染宠物）。
+- insert:
+    - id: deskpet
+      name: deskpet

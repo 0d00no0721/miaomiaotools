@@ -1,0 +1,35 @@
+{
+  "name": "deskpet",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "轻量 DSH Web GUI 桌面宠物：右下角悬浮、可拖拽/换角色的陪伴型伙伴（右下角形态，精简自 whale-girl）",
+  "main": "./index.mjs",
+  "exports": {
+    ".": "./index.mjs",
+    "./client": "./client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
+    }
+  },
+  "scripts": {
+    "build:client": "node scripts/build-client.mjs",
+    "check:client": "node scripts/build-client.mjs --check",
+    "test": "node tests/run.mjs"
+  },
+  "files": [
+    "index.mjs",
+    "src",
+    "client",
+    "client.js",
+    "assets"
+  ],
+  "license": "MIT"
+}
