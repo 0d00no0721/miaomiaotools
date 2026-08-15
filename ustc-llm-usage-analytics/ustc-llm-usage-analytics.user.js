@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         USTC LLM 用量统计与可视化
 // @namespace    https://llm.ustc.edu.cn/
-// @version      2.3.2
+// @version      2.3.3
 // @description  在线统计当天用量 + 本地持久化每日快照，形成历史累计柱状图
 // @author       0d000721
 // @match        https://llm.ustc.edu.cn/*
@@ -106,6 +106,13 @@
       items = items.concat(r.items || []);
     }
     console.log('[USTC] fetchAllLogs: 接口 total=' + total + ' pages=' + pages + ' 实际拉到=' + items.length + ' 条');
+    // 过滤掉"总 Token 为 0"的访问(通常是 unknown 错误/空调用),避免污染统计与图表
+    const before = items.length;
+    items = items.filter((it) => {
+      const v = Number(it.total_tokens);
+      return isFinite(v) && v > 0;
+    });
+    if (before !== items.length) console.log('[USTC] fetchAllLogs: 已过滤 ' + (before - items.length) + ' 条总Token为0的记录, 剩余 ' + items.length + ' 条');
     return items;
   }
 
@@ -799,7 +806,10 @@
       $('#ustc-prog').style.width = '80%';
 
       lastTodaySummary = summary;
-      lastTodayModels = models || [];
+      lastTodayModels = (models || []).filter((m) => {
+        const v = Number(m.total_tokens);
+        return isFinite(v) && v > 0;   // 剔除总Token为0的模型(unknown/错误)
+      });
 
       // 明细拆分:
       //  - 时间图窗口 = 从现在往前 24 小时(跨自然日)
