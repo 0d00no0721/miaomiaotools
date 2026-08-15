@@ -1,0 +1,7 @@
+node_modules/
+*.log
+*.rollback-*
+.DS_Store
+Thumbs.db
+# 一次性调试残留（RePKG 解包日志转储，不提交）
+PowerShell结果.md

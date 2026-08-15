@@ -1,0 +1,6 @@
+# wallpapers bundle patch：向 web 组合挂载 wallpapers。
+# Node half 扫描壁纸目录 + 托管素材 + 暴露 /wallpapers 清单；
+# client half 由 dsh.client 内核经 /plugins/wallpapers/client.js 挂载渲染背景层。
+- insert:
+    - id: wallpapers
+      name: wallpapers
