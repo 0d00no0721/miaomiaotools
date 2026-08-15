@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         USTC LLM 用量统计与可视化
 // @namespace    https://llm.ustc.edu.cn/
-// @version      2.3.3
+// @version      2.3.4
 // @description  在线统计当天用量 + 本地持久化每日快照，形成历史累计柱状图
 // @author       0d000721
 // @match        https://llm.ustc.edu.cn/*
@@ -301,8 +301,8 @@
     }
 
     #ustc-usage-drawer .toolbar {
-      padding: 12px 20px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
-      border-bottom: 1px solid #1e293b;
+      padding: 12px 20px 0; display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+      justify-content: flex-start;
     }
     #ustc-usage-drawer .toolbar button {
       background: #2563eb; color: #fff; border: none; cursor: pointer;
@@ -319,6 +319,31 @@
     #ustc-usage-drawer .seg-group button.active { background: #2563eb; color: #fff; }
     #ustc-usage-drawer .hist-controls { display: flex; align-items: center; gap: 12px; padding: 12px 20px; border-bottom: 1px solid #1e293b; flex-wrap: wrap; }
     #ustc-usage-drawer .hist-controls .cap { font-size: 12px; color: #64748b; }
+    #ustc-usage-drawer .rank-row {
+      display: flex; align-items: center; gap: 10px; padding: 8px 4px;
+      border-bottom: 1px solid #1e293b; font-size: 13px;
+    }
+    #ustc-usage-drawer .rank-row:last-child { border-bottom: none; }
+    #ustc-usage-drawer .rank-idx {
+      width: 26px; height: 26px; border-radius: 6px; flex: 0 0 auto;
+      display: flex; align-items: center; justify-content: center;
+      background: #1e293b; color: #94a3b8; font-weight: 700; font-size: 13px;
+    }
+    #ustc-usage-drawer .rank-row:nth-child(1) .rank-idx { background: #b45309; color: #fff; }
+    #ustc-usage-drawer .rank-row:nth-child(2) .rank-idx { background: #475569; color: #fff; }
+    #ustc-usage-drawer .rank-row:nth-child(3) .rank-idx { background: #92400e; color: #fff; }
+    #ustc-usage-drawer .rank-name { flex: 1; color: #e2e8f0; word-break: break-all; }
+    #ustc-usage-drawer .rank-val {
+      color: #93c5fd; font-weight: 600; white-space: nowrap;
+      flex: 0 0 90px; text-align: right;
+    }
+    #ustc-usage-drawer .rank-bar {
+      position: relative; height: 8px; background: #1e293b; border-radius: 4px;
+      flex: 1 1 auto; min-width: 80px; overflow: hidden;
+    }
+    #ustc-usage-drawer .rank-bar > i {
+      position: absolute; left: 0; top: 0; bottom: 0; background: linear-gradient(90deg, #2563eb, #3b82f6); border-radius: 4px;
+    }
 
     #ustc-usage-drawer .kpis {
       display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; padding: 16px 20px 0;
@@ -327,8 +352,11 @@
     #ustc-usage-drawer .kpi .lbl { font-size: 12px; color: #94a3b8; }
     #ustc-usage-drawer .kpi .val { font-size: 20px; font-weight: 700; margin-top: 4px; color: #fff; }
 
+    #ustc-usage-drawer .scroll {
+      flex: 1; overflow-y: auto; min-height: 0;
+    }
     #ustc-usage-drawer .body {
-      flex: 1; overflow-y: auto; padding: 16px 20px 24px;
+      padding: 16px 20px 24px;
       display: flex; flex-direction: column; gap: 18px;
     }
     #ustc-usage-drawer .chart { width: 100%; height: 320px; background: #0b1220; border-radius: 10px; }
@@ -359,13 +387,15 @@
       <button class="tab active" data-tab="today">当天</button>
       <button class="tab" data-tab="history">历史累计</button>
     </div>
-    <div class="toolbar">
-      <button id="ustc-btn-load">🔄 刷新并归档</button>
-      <button id="ustc-btn-export" class="ghost">⬇ 导出 CSV</button>
-      <button id="ustc-btn-clear-history" class="ghost danger">🗑 清空本地历史</button>
+    <div class="scroll" id="ustc-scroll">
+      <div class="toolbar">
+        <button id="ustc-btn-load">🔄 刷新并归档</button>
+        <button id="ustc-btn-export" class="ghost">⬇ 导出 CSV</button>
+        <button id="ustc-btn-clear-history" class="ghost danger">🗑 清空本地历史</button>
+      </div>
+      <div class="kpis" id="ustc-kpis"></div>
+      <div class="body" id="ustc-body"></div>
     </div>
-    <div class="kpis" id="ustc-kpis"></div>
-    <div class="body" id="ustc-body"></div>
   `;
   document.body.appendChild(drawer);
 
@@ -374,7 +404,8 @@
   let lastTodayModels = [];
   let lastLogItems = [];
   let histRangeDays = 7;   // 历史展示天数范围(7/15/30)
-  let histMode = 'bar';    // bar=柱状(堆叠) / line=累计折线
+  let histMode = 'bar';    // bar=柱状(堆叠) / daily=单日折线 / line=累计折线
+  let rankBy = 'usage';    // 当天榜单排序指标: usage=使用量 / spend=价格 / cache=缓存命中率
 
   /* 标签切换 */
   drawer.querySelectorAll('.tab').forEach((t) => {
@@ -540,6 +571,8 @@
   /* --- 当天渲染 --- */
   function renderToday() {
     const body = $('#ustc-body');
+    const sc = $('#ustc-scroll');
+    const savedScroll = sc ? sc.scrollTop : 0;
     body.innerHTML = '';
     if (!lastTodaySummary) {
       body.innerHTML = '<div class="empty">点击「🔄 刷新并归档」开始抓取当天数据</div>';
@@ -598,6 +631,86 @@
       body.appendChild(cardT);
     }
 
+    // ---- 当天模型榜单 ----
+    {
+      const cardR = card('当天模型榜单（仅统计今天用过的模型）');
+      // 指标切换
+      const ctrl = document.createElement('div');
+      ctrl.className = 'seg-group';
+      const mkBtn = (label, key) => {
+        const b = document.createElement('button');
+        b.textContent = label;
+        if (rankBy === key) b.classList.add('active');
+        b.addEventListener('click', () => { rankBy = key; renderToday(); });
+        ctrl.appendChild(b);
+      };
+      mkBtn('使用量', 'usage');
+      mkBtn('价格', 'spend');
+      mkBtn('缓存命中率', 'cache');
+      cardR.appendChild(ctrl);
+
+      const list = document.createElement('div');
+      cardR.appendChild(list);
+
+      // 计算各模型的三项指标
+      const rows = (lastTodayModels || []).map((m) => {
+        const usage = Number(m.total_tokens) || 0;
+        const spend = Number(m.spend) || 0;
+        const prompt = Number(m.prompt_tokens) || 0;
+        const cache = Number(m.cache_read_input_tokens) || 0;
+        const cacheRate = prompt > 0 ? cache / prompt : 0;
+        return { name: m.name || '未知', usage, spend, cacheRate };
+      });
+
+      if (!rows.length) {
+        const e = document.createElement('div');
+        e.className = 'empty';
+        e.textContent = '今天暂无模型调用';
+        list.appendChild(e);
+      } else {
+        // 排序
+        let sorted, fmtVal, unit;
+        if (rankBy === 'spend') {
+          sorted = rows.slice().sort((a, b) => b.spend - a.spend);
+          fmtVal = (r) => fmtMoney(r.spend);
+          unit = '';
+        } else if (rankBy === 'cache') {
+          sorted = rows.slice().sort((a, b) => b.cacheRate - a.cacheRate);
+          fmtVal = (r) => (r.cacheRate * 100).toFixed(1) + '%';
+          unit = '';
+        } else {
+          sorted = rows.slice().sort((a, b) => b.usage - a.usage);
+          fmtVal = (r) => fmtInt(r.usage);
+          unit = ' token';
+        }
+        const maxV = rankBy === 'spend' ? (sorted[0] ? sorted[0].spend : 1)
+                  : rankBy === 'cache' ? (sorted[0] ? sorted[0].cacheRate : 1)
+                  : (sorted[0] ? sorted[0].usage : 1);
+        sorted.forEach((r, i) => {
+          const row = document.createElement('div');
+          row.className = 'rank-row';
+          const idx = document.createElement('span');
+          idx.className = 'rank-idx';
+          idx.textContent = String(i + 1);
+          const name = document.createElement('span');
+          name.className = 'rank-name';
+          name.textContent = r.name;
+          const bar = document.createElement('span');
+          bar.className = 'rank-bar';
+          const fill = document.createElement('i');
+          const key = rankBy === 'spend' ? r.spend : rankBy === 'cache' ? r.cacheRate : r.usage;
+          fill.style.width = (maxV > 0 ? Math.max(2, (key / maxV) * 100) : 0) + '%';
+          bar.appendChild(fill);
+          const val = document.createElement('span');
+          val.className = 'rank-val';
+          val.textContent = fmtVal(r) + unit;
+          row.appendChild(idx); row.appendChild(name); row.appendChild(bar); row.appendChild(val);
+          list.appendChild(row);
+        });
+      }
+      body.appendChild(cardR);
+    }
+
     // 归档说明
     const h = getHistory();
     const today = todayStr();
@@ -606,11 +719,15 @@
       (h[today] ? '✅ 今天快照已归档 · 时间戳：' + h[today].archived_at : '⏳ 今天尚未归档（点「🔄 刷新并归档」）') +
       '<div class="note">本地历史共 ' + Object.keys(h).length + ' 天</div></div>';
     body.appendChild(note);
+
+    if (sc) sc.scrollTop = savedScroll;
   }
 
   /* --- 历史累计渲染 --- */
   function renderHistory() {
     const body = $('#ustc-body');
+    const sc = $('#ustc-scroll');
+    const savedScroll = sc ? sc.scrollTop : 0;
     body.innerHTML = '';
     const h = getHistory();
     const days = Object.keys(h).sort();
@@ -748,6 +865,8 @@
       '展示天数 = min(已累积天数, 所选范围)。当前显示最近 ' + showDays + ' 天。<br/>' +
       '「单日折线」为每天实际用量；「累计折线」为按模型的逐日累加值。之前未采集的历史无法找回。</div>';
     body.appendChild(note);
+
+    if (sc) sc.scrollTop = savedScroll;
   }
 
   /* ================= 导出 CSV ================= */
