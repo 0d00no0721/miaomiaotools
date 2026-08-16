@@ -16,7 +16,7 @@ export const MODES = Object.freeze({ chat: 'chat', fullscreen: 'fullscreen' })
 
 /**
  * 规范化 catalog 返回的条目为 client 可消费形态。
- * 只保留可播放项（video/web），并可额外暴露 preview。
+ * 只保留可播放项（video），并可额外暴露 preview。
  * scene 型已按用户拍板弃用（不再进入可播放列表，归入 unsupported）。
  * 入参 { ok, root, items } → 出参 { playable: [...], unsupportedCount: number }。
  */
@@ -26,7 +26,7 @@ export function normalizeCatalog(catalog) {
   let unsupportedCount = 0
   for (const it of items) {
     if (!it || typeof it !== 'object') continue // 跳过 null/畸形条目
-    if (it.kind === 'video' || it.kind === 'web') {
+    if (it.kind === 'video') {
       playable.push({
         id: String(it.id),
         title: String(it.title ?? it.id),

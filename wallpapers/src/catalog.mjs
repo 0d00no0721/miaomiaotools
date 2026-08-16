@@ -1,9 +1,9 @@
 // 壁纸目录扫描：解析 Wallpaper Engine 创意工坊目录（project.json）为可播放清单。
 // 纯 Node，零依赖；只读本地目录。可播放类型：
 //   video/Video → 单个 .mp4（浏览器 <video> 直接播放）
-//   web/Web    → index.html（浏览器 <iframe> 直接加载）
+//   web/Web    → 已弃用（用户拍板），归入 unsupported，不进入可播放列表
 //   scene/Scene → 已弃用（用户拍板），归入 unsupported，不进入可播放列表
-// 其余（preset 依赖型、scene、dxs 骨骼动画）暂不支持，仅作占位/提示列出。
+// 其余（preset 依赖型、dxs 骨骼动画）暂不支持，仅作占位/提示列出。
 import { readdirSync, readFileSync, existsSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -90,14 +90,9 @@ export function scanCatalog(rootDir = DEFAULT_WALLPAPER_DIR) {
     const id = name
     const title = prj.title || id
 
-    // --- web 类型 ---
+    // --- web 类型：已按用户拍板弃用，归入 unsupported（不再进可播放列表） ---
     if (prj.type === 'web') {
-      const entry = prj.file && isSafeRel(prj.file) ? prj.file : 'index.html'
-      if (existsSync(join(itemDir, entry))) {
-        items.push({ id, title, kind: 'web', file: entry, preview: prj.preview || '' })
-      } else {
-        items.push({ id, title, kind: 'unsupported', file: '', preview: prj.preview || '' })
-      }
+      items.push({ id, title, kind: 'unsupported', file: '', preview: prj.preview || '' })
       continue
     }
 

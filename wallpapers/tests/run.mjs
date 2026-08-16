@@ -29,10 +29,9 @@ function ok(v, label) { if (v) { pass++; console.log('  ok  ', label) } else { f
     ],
   }
   const n = normalizeCatalog(cat)
-  eq(n.playable.length, 2, '规范化只保留可播放项')
+  eq(n.playable.length, 1, '规范化只保留可播放项')
   eq(n.playable[0].id, '1', 'video 项保留')
-  eq(n.playable[1].kind, 'web', 'web 项保留')
-  eq(n.unsupportedCount, 2, 'unsupported 计数')
+  eq(n.unsupportedCount, 3, 'web/unsupported 计数')
 }
 eq(normalizeCatalog(null).playable.length, 0, '空 catalog 安全')
 {

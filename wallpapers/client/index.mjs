@@ -10,8 +10,13 @@ import {
   SELECTED_KEY, MODE_KEY, NONE_ID, RANDOM_ID, MODES,
   normalizeCatalog, resolveSelection, findItem, isMetaSelection,
 } from './logic.mjs'
+import { WPE_ICON } from './icon.mjs'
 
 export const name = 'wallpapers'
+
+// localStorage 键：音量（0-100）与「离开此网页时静音」开关。
+const VOLUME_KEY = 'wallpapers:volume'
+const MUTE_ON_BLUR_KEY = 'wallpapers:muteOnBlur'
 
 // ---- 精简 CSS ----
 const CSS = `
@@ -64,20 +69,36 @@ body[data-wallpapers-active][data-ds-dark-theme] {
 }
 body[data-wallpapers-active] #root { position: relative; z-index: 1; }
 [data-wallpapers].wp-btn { position: fixed; right: 16px; bottom: 16px; z-index: 2147483000;
-  width: 36px; height: 36px; border-radius: 50%; cursor: pointer; border: 1px solid rgba(255,255,255,.18);
-  background: rgba(24,28,38,.82); color: #E8EBF2; font-size: 16px; line-height: 36px; text-align: center;
-  user-select: none; box-shadow: 0 8px 24px rgba(0,0,0,.35); transition: transform .15s ease; }
+  width: 44px; height: 44px; border-radius: 12px; cursor: pointer; border: 1px solid rgba(255,255,255,.18);
+  background: rgba(24,28,38,.82); padding: 0; overflow: hidden; display: flex; align-items: center;
+  justify-content: center; user-select: none; box-shadow: 0 8px 24px rgba(0,0,0,.35);
+  transition: transform .15s ease; }
 [data-wallpapers].wp-btn:hover { transform: scale(1.08); }
+[data-wallpapers].wp-btn .wp-btn-icon { width: 100%; height: 100%; object-fit: cover; border-radius: 11px;
+  display: block; }
 [data-wallpapers].wp-panel { position: fixed; right: 16px; bottom: 60px; z-index: 2147483000;
   width: 300px; max-height: 70vh; overflow-y: auto; background: rgba(24,28,38,.96);
   border: 1px solid rgba(255,255,255,.12); border-radius: 12px; color: #E8EBF2;
   font-family: system-ui, sans-serif; font-size: 13px; box-shadow: 0 16px 40px rgba(0,0,0,.45); }
-[data-wallpapers].wp-panel .wp-head { padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,.1);
-  display: flex; align-items: center; justify-content: space-between; font-weight: 600; }
-[data-wallpapers].wp-panel .wp-modebar { padding: 8px 12px; display: flex; gap: 6px; flex-wrap: wrap; }
-[data-wallpapers].wp-panel .wp-mode { background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.14);
-  color: #E8EBF2; border-radius: 6px; padding: 4px 10px; cursor: pointer; font-size: 12px; }
-[data-wallpapers].wp-panel .wp-mode.on { background: rgba(96,142,255,.32); border-color: rgba(130,165,255,.6); }
+/* 面板头部：整体 sticky，标题行 + 副栏（音量/静音开关）两行一起常驻顶端 */
+[data-wallpapers].wp-panel .wp-head { position: sticky; top: 0; z-index: 1;
+  background: rgba(24,28,38,.98); border-bottom: 1px solid rgba(255,255,255,.1); }
+[data-wallpapers].wp-panel .wp-headrow { display: flex; align-items: center;
+  justify-content: space-between; font-weight: 600; padding: 10px 12px 6px; }
+[data-wallpapers].wp-panel .wp-subbar { display: flex; align-items: center; gap: 8px;
+  padding: 0 12px 10px; font-weight: 400; }
+[data-wallpapers].wp-subbar .wp-vol-label { opacity: .7; font-size: 12px; white-space: nowrap; }
+[data-wallpapers].wp-subbar input[type=range] { flex: 1 1 auto; accent-color: #608eff; margin: 0; }
+[data-wallpapers].wp-subbar .wp-vol-val { min-width: 34px; text-align: right; opacity: .7;
+  font-size: 12px; font-variant-numeric: tabular-nums; }
+[data-wallpapers].wp-subbar .wp-mute-toggle { display: flex; align-items: center; gap: 5px;
+  cursor: pointer; opacity: .85; font-size: 12px; white-space: nowrap; user-select: none; }
+[data-wallpapers].wp-subbar .wp-mute-toggle:hover { opacity: 1; }
+[data-wallpapers].wp-subbar .wp-mute-toggle input { cursor: pointer; margin: 0; }
+
+
+  
+
 [data-wallpapers].wp-panel .wp-item { display: flex; align-items: center; gap: 10px; padding: 8px 12px;
   cursor: pointer; border-bottom: 1px solid rgba(255,255,255,.06); }
 [data-wallpapers].wp-panel .wp-item:hover { background: rgba(255,255,255,.06); }
@@ -106,10 +127,20 @@ export function apply(ctx = {}) {
   // ---- 运行状态 ----
   let catalog = { playable: [], unsupportedCount: 0, root: '' }
   let selected = localStorage.getItem(SELECTED_KEY) || NONE_ID
-  let mode = localStorage.getItem(MODE_KEY) || MODES.chat
+    if (selected === RANDOM_ID) selected = NONE_ID // 随机已移除：遗留 __random__ 归一化为无壁纸
+  const mode = MODES.fullscreen // 固定全屏（对话背景/全屏切换已于用户拍板移除）
   let panelOpen = false
   let savedBodyBg = null // 激活时保存并清除 body 背景（压制皮肤工作室图片），停用时恢复
+let rotateTimer = null // 随机已移除；保留变量让清理里的 clearTimeout(null) 成为无害 no-op
   let sceneGen = 0 // scene 渲染代数，切壁纸时递增以丢弃过期的异步图层
+
+  // ---- 音量与「离开网页静音」状态 ----
+  const volVal = Number(localStorage.getItem(VOLUME_KEY))
+  let volume = Number.isFinite(volVal) ? Math.min(100, Math.max(0, volVal)) : 0
+  let muteOnBlur = localStorage.getItem(MUTE_ON_BLUR_KEY) === '1' // 默认关闭
+  let currentVideo = null // 当前背景 <video> 元素（音量/静音实时作用于它）
+  let pageActive = true // 页面可见且窗口聚焦（离开网页 = false）
+  let windowHasFocus = true
 
   // ---- 背景层 ----
   const layer = document.createElement('div')
@@ -122,7 +153,12 @@ export function apply(ctx = {}) {
   btn.setAttribute('data-wallpapers', '')
   btn.setAttribute('aria-label', '壁纸')
   btn.className = 'wp-btn'
-  btn.textContent = '🖼'
+  const icon = document.createElement('img')
+  icon.className = 'wp-btn-icon'
+  icon.src = WPE_ICON
+  icon.alt = '壁纸'
+  icon.draggable = false
+  btn.appendChild(icon)
   document.body.appendChild(btn)
 
   // ---- 面板 ----
@@ -218,6 +254,26 @@ export function apply(ctx = {}) {
     }).catch(() => { fallbackPreview(item) })
   }
 
+  // ---- 音量 / 静音状态应用到当前 video ----
+  // forceMuted 仅在「用户未交互发声」阶段使用：视频最初以 muted 加载绕过 autoplay 限制。
+  function applyAudioState(video, forceMuted = false) {
+    const v = video || currentVideo
+    if (!v) return
+    const inBackground = !pageActive
+    const shouldMute = forceMuted || volume === 0 || (muteOnBlur && inBackground)
+    if (v.muted !== shouldMute) v.muted = shouldMute
+    v.volume = volume / 100
+  }
+
+  // 根据窗口/页面可见性刷新当前视频静音（离开网页时静音的开关在此生效）。
+  function refreshPageActive() {
+    pageActive = windowHasFocus && !document.hidden
+    applyAudioState(currentVideo)
+  }
+  // 命名 handler，供绑定与清理复用（避免匿名函数无法 removeEventListener）。
+  function onWinBlur() { windowHasFocus = false; refreshPageActive() }
+  function onWinFocus() { windowHasFocus = true; refreshPageActive() }
+
   // ---- 应用壁纸到背景层 ----
   function applyWallpaper() {
     layer.innerHTML = ''
@@ -225,6 +281,7 @@ export function apply(ctx = {}) {
     sceneGen++ // 旧 scene fetch 失效
     const resolved = resolveSelection(selected, catalog.playable)
     if (resolved === NONE_ID) {
+        layer.style.display = 'none' // 无壁纸：隐藏黑色背景层，避免盖住界面文字（bug 修复）
       document.body.removeAttribute('data-wallpapers-active')
       document.body.style.removeProperty('--wp-glass')
       if (savedBodyBg !== null) {
@@ -232,10 +289,12 @@ export function apply(ctx = {}) {
         savedBodyBg = null
       }
       layer.style.pointerEvents = 'none'
+      currentVideo = null
       return
     }
     const item = findItem(catalog.playable, resolved)
     if (!item) {
+        layer.style.display = 'none' // 无可用壁纸：隐藏黑色背景层
       document.body.removeAttribute('data-wallpapers-active')
       document.body.style.removeProperty('--wp-glass')
       if (savedBodyBg !== null) {
@@ -243,12 +302,14 @@ export function apply(ctx = {}) {
         savedBodyBg = null
       }
       layer.style.pointerEvents = 'none'
+      currentVideo = null
       return
     }
 
     // 激活：给 body 打标，让界面浮在壁纸之上、body 背景变透明；
     // 同时内联清除 body 背景（压制皮肤工作室画在 body 上的图片，避免双重显示）
-    document.body.setAttribute('data-wallpapers-active', '')
+    layer.style.display = '' // 有壁纸：恢复显示背景层
+      document.body.setAttribute('data-wallpapers-active', '')
     if (savedBodyBg === null) {
       savedBodyBg = document.body.style.backgroundImage
       document.body.style.backgroundImage = 'none'
@@ -257,24 +318,28 @@ export function apply(ctx = {}) {
     if (item.kind === 'video') {
       const v = document.createElement('video')
       v.setAttribute('autoplay', '')
-      v.setAttribute('muted', '')
       v.setAttribute('loop', '')
       v.setAttribute('playsinline', '')
       v.src = mediaUrl(item.id, item.file)
       v.addEventListener('error', () => { console.warn('[wallpapers] 视频加载失败', item.file) })
+      currentVideo = v
+      // 初始 muted 以绕过浏览器有声 autoplay 限制；用户拖动音量条时才真正解禁发声。
+      applyAudioState(v, true)
       const p = v.play()
       if (p && p.catch) p.catch(() => {})
       layer.appendChild(v)
-    } else if (item.kind === 'web') {
-      const f = document.createElement('iframe')
-      f.src = itemUrl(item.id, item.file)
-      f.setAttribute('scrolling', 'no')
-      // 网页壁纸无需交互（壁纸层 pointer-events:none）
-      layer.appendChild(f)
-    // scene 已弃用：renderSceneDead 仅为保留的死代码、无任何调用链触达
-      // 旧 else-if 分支已移除（scene 不再进入 playable）
-      // renderSceneDead(item) —— 已随 scene 分支移除，不再调用
+    } // web/scene 不再支持（catalog 已不产出，仅剩 video）
+      
+      
+      
+      
+      
+    
+      
+      
+/* web/scene 分支删除后的残余闭合花括号，已注释
     }
+*/
 
     // 展示模式：都保持在界面之下，区别只在壁纸亮度与界面玻璃透明度
     layer.classList.toggle('wp-fullscreen', mode === MODES.fullscreen)
@@ -296,31 +361,78 @@ export function apply(ctx = {}) {
     panel.innerHTML = ''
     const head = document.createElement('div')
     head.className = 'wp-head'
+    // 标题行（标题 + ✕）
+    const row = document.createElement('div')
+    row.className = 'wp-headrow'
     const t = document.createElement('span')
     t.textContent = '壁纸 (Wallpaper)'
     const close = document.createElement('span')
     close.className = 'wp-close'
     close.textContent = '✕'
     close.addEventListener('click', () => setPanel(false))
-    head.appendChild(t)
-    head.appendChild(close)
+    row.appendChild(t)
+    row.appendChild(close)
+    head.appendChild(row)
+    // 副栏（第二行）：音量滑杆 + 「离开此网页时静音」开关
+    const sub = document.createElement('div')
+    sub.className = 'wp-subbar'
+    const volLabel = document.createElement('span')
+    volLabel.className = 'wp-vol-label'
+    volLabel.textContent = '🔊 音量'
+    const range = document.createElement('input')
+    range.type = 'range'
+    range.min = '0'
+    range.max = '100'
+    range.step = '1'
+    range.value = String(volume)
+    const volVal = document.createElement('span')
+    volVal.className = 'wp-vol-val'
+    volVal.textContent = `${volume}%`
+    range.addEventListener('input', () => {
+      volume = Math.min(100, Math.max(0, Number(range.value) || 0))
+      localStorage.setItem(VOLUME_KEY, String(volume))
+      volVal.textContent = `${volume}%`
+      // 用户拖动 = 交互手势，触发真正发声（解除初始 muted）。
+      applyAudioState(currentVideo)
+    })
+    const muteLab = document.createElement('label')
+    muteLab.className = 'wp-mute-toggle'
+    const muteChk = document.createElement('input')
+    muteChk.type = 'checkbox'
+    muteChk.checked = muteOnBlur
+    muteChk.addEventListener('change', () => {
+      muteOnBlur = muteChk.checked
+      localStorage.setItem(MUTE_ON_BLUR_KEY, muteOnBlur ? '1' : '0')
+      applyAudioState(currentVideo)
+    })
+    const muteTxt = document.createElement('span')
+    muteTxt.textContent = '离开网页静音'
+    muteLab.appendChild(muteChk)
+    muteLab.appendChild(muteTxt)
+    sub.appendChild(volLabel)
+    sub.appendChild(range)
+    sub.appendChild(volVal)
+    sub.appendChild(muteLab)
+    head.appendChild(sub)
     panel.appendChild(head)
 
-    // 模式条
-    const modebar = document.createElement('div')
-    modebar.className = 'wp-modebar'
-    const mk = (label, m) => {
-      const b = document.createElement('button')
-      b.className = 'wp-mode' + (mode === m ? ' on' : '')
-      b.textContent = label
-      b.addEventListener('click', () => { mode = m; localStorage.setItem(MODE_KEY, m); applyWallpaper(); renderPanel() })
-      modebar.appendChild(b)
+    
+    
+    
+    
+      
+      
+      
+      
+      
+/* 以下为删除模式条后的残余（孤立闭合花括号），已整体注释，勿启用
     }
-    mk('对话背景', MODES.chat)
-    mk('全屏', MODES.fullscreen)
-    panel.appendChild(modebar)
+*/
+    
+    
+    
 
-    // 无壁纸 / 随机
+    // 无壁纸
     const mkMeta = (id, label) => {
       const d = document.createElement('div')
       d.className = 'wp-item' + (selected === id ? ' on' : '')
@@ -332,13 +444,13 @@ export function apply(ctx = {}) {
       panel.appendChild(d)
     }
     mkMeta(NONE_ID, '🚫 无壁纸')
-    mkMeta(RANDOM_ID, '🎲 随机切换')
+    
 
     // 播放列表
     if (catalog.playable.length === 0) {
       const e = document.createElement('div')
       e.className = 'wp-empty'
-      e.textContent = '未发现可播放的壁纸（视频/网页/场景）'
+      e.textContent = '未发现可播放的壁纸（视频）'
       panel.appendChild(e)
     } else {
       for (const it of catalog.playable) {
@@ -364,7 +476,7 @@ export function apply(ctx = {}) {
     if (catalog.unsupportedCount > 0) {
       const note = document.createElement('div')
       note.className = 'wp-empty'
-      note.textContent = `${catalog.unsupportedCount} 个壁纸暂不支持（scene / preset 依赖型等）`
+      note.textContent = `${catalog.unsupportedCount} 个壁纸暂不支持（web / scene / preset 依赖型等）`
       panel.appendChild(note)
     }
   }
@@ -391,23 +503,32 @@ export function apply(ctx = {}) {
     }
   }
 
-  // ---- 「随机」模式：定期换一张 ----
-  const ROTATE_MS = 120000
-  let rotateTimer = null
-  function scheduleRotate() {
+  
+  
+  
+  
+/* 随机 rotate 残余（rotateTimer 已删除）：
     clearTimeout(rotateTimer)
-    if (selected !== RANDOM_ID) return
-    rotateTimer = setTimeout(() => { applyWallpaper(); scheduleRotate() }, ROTATE_MS)
+    
+    
   }
+*/
 
   // ---- 启动 ----
+  document.addEventListener('visibilitychange', refreshPageActive)
+  window.addEventListener('blur', onWinBlur)
+  window.addEventListener('focus', onWinFocus)
   void loadCatalog()
   applyWallpaper()
-  scheduleRotate()
+  
 
   // ---- 清理 ----
   return () => {
     clearTimeout(rotateTimer)
+    document.removeEventListener('visibilitychange', refreshPageActive)
+    window.removeEventListener('blur', onWinBlur)
+    window.removeEventListener('focus', onWinFocus)
+    currentVideo = null
     document.body.removeAttribute('data-wallpapers-active')
     document.body.style.removeProperty('--wp-glass')
     if (savedBodyBg !== null) {
