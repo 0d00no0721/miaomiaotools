@@ -5,3 +5,4 @@ export const CATALOG_PATH = `${ROUTE_PREFIX}/catalog`
 export const MEDIA_PATH   = `${ROUTE_PREFIX}/media`
 export const ITEM_PATH    = `${ROUTE_PREFIX}/item`
 export const SCENE_PATH   = `${ROUTE_PREFIX}/scene`
+export const SCENE_AUDIO_PATH = `${ROUTE_PREFIX}/scene-audio`

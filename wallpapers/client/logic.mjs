@@ -16,8 +16,7 @@ export const MODES = Object.freeze({ chat: 'chat', fullscreen: 'fullscreen' })
 
 /**
  * 规范化 catalog 返回的条目为 client 可消费形态。
- * 只保留可播放项（video），并可额外暴露 preview。
- * scene 型已按用户拍板弃用（不再进入可播放列表，归入 unsupported）。
+ * 保留可播放项：video（文件）与 scene（一张屏幕截图背景图 + 可选音频列表）。
  * 入参 { ok, root, items } → 出参 { playable: [...], unsupportedCount: number }。
  */
 export function normalizeCatalog(catalog) {
@@ -33,6 +32,16 @@ export function normalizeCatalog(catalog) {
         kind: it.kind,
         file: String(it.file ?? ''),
         preview: String(it.preview ?? ''),
+      })
+    } else if (it.kind === 'scene') {
+      playable.push({
+        id: String(it.id),
+        title: String(it.title ?? it.id),
+        kind: it.kind,
+        file: '',
+        preview: String(it.preview ?? ''),
+        image: String(it.image ?? ''),
+        audios: Array.isArray(it.audios) ? it.audios.filter((s) => typeof s === 'string' && s !== '').map(String) : [],
       })
     } else {
       unsupportedCount++

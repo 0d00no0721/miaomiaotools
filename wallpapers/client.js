@@ -17,6 +17,7 @@ const CATALOG_PATH = `${ROUTE_PREFIX}/catalog`
 const MEDIA_PATH   = `${ROUTE_PREFIX}/media`
 const ITEM_PATH    = `${ROUTE_PREFIX}/item`
 const SCENE_PATH   = `${ROUTE_PREFIX}/scene`
+const SCENE_AUDIO_PATH = `${ROUTE_PREFIX}/scene-audio`
 
 // wallpapers client 纯逻辑（无 DOM 引用，可单测）：
 // 清单条目规范化 + 选择持久化（localStorage 键约定）+ 展示模式。
@@ -36,8 +37,7 @@ const MODES = Object.freeze({ chat: 'chat', fullscreen: 'fullscreen' })
 
 /**
  * 规范化 catalog 返回的条目为 client 可消费形态。
- * 只保留可播放项（video），并可额外暴露 preview。
- * scene 型已按用户拍板弃用（不再进入可播放列表，归入 unsupported）。
+ * 保留可播放项：video（文件）与 scene（一张屏幕截图背景图 + 可选音频列表）。
  * 入参 { ok, root, items } → 出参 { playable: [...], unsupportedCount: number }。
  */
 function normalizeCatalog(catalog) {
@@ -53,6 +53,16 @@ function normalizeCatalog(catalog) {
         kind: it.kind,
         file: String(it.file ?? ''),
         preview: String(it.preview ?? ''),
+      })
+    } else if (it.kind === 'scene') {
+      playable.push({
+        id: String(it.id),
+        title: String(it.title ?? it.id),
+        kind: it.kind,
+        file: '',
+        preview: String(it.preview ?? ''),
+        image: String(it.image ?? ''),
+        audios: Array.isArray(it.audios) ? it.audios.filter((s) => typeof s === 'string' && s !== '').map(String) : [],
       })
     } else {
       unsupportedCount++
@@ -97,7 +107,7 @@ const CSS = `
 /* 壁纸层：固定在视口最底层，位于 body 背景之上、界面 #root 之下；永不拦截交互 */
 [data-wallpapers].wp-layer { position: fixed; inset: 0; z-index: 0; overflow: hidden;
   pointer-events: none; background: #000; }
-[data-wallpapers].wp-layer video, [data-wallpapers].wp-layer iframe {
+[data-wallpapers].wp-layer video, [data-wallpapers].wp-layer iframe, [data-wallpapers].wp-layer img.wp-scene-bg {
 position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; border: 0; }
     
     
@@ -209,9 +219,13 @@ let rotateTimer = null // 随机已移除；保留变量让清理里的 clearTim
 
   // ---- 音量与「离开网页静音」状态 ----
   const volVal = Number(localStorage.getItem(VOLUME_KEY))
-  let volume = Number.isFinite(volVal) ? Math.min(100, Math.max(0, volVal)) : 0
+  let volume = Number.isFinite(volVal) ? Math.min(100, Math.max(0, volVal)) : 50 // 默认 50%（避免初始 muted 需用户点音量条才发声）
   let muteOnBlur = localStorage.getItem(MUTE_ON_BLUR_KEY) === '1' // 默认关闭
   let currentVideo = null // 当前背景 <video> 元素（音量/静音实时作用于它）
+  let currentAudio = null // 当前背景 <audio> 元素（scene 复刻的音频；音量/静音实时作用于它）
+  // scene 音频单例：一个 <audio> 终身复用（切壁纸只换 src），避免每次重建触发浏览器自动播放拦截。
+  let audioEl = null
+  let audioCtx = null // { itemId, tracks, idx }
   let pageActive = true // 页面可见且窗口聚焦（离开网页 = false）
   let windowHasFocus = true
 
@@ -251,6 +265,9 @@ let rotateTimer = null // 随机已移除；保留变量让清理里的 clearTim
   }
   function sceneUrl(item) {
     return `${SCENE_PATH}?item=${encodeURIComponent(item)}`
+  }
+  function sceneAudioUrl(item, file) {
+    return `${SCENE_AUDIO_PATH}?item=${encodeURIComponent(item)}&f=${encodeURIComponent(file)}`
   }
 
   // 场景壁纸：把 "r g b" 这种 0-1 浮点颜色转成 CSS rgb()
@@ -327,15 +344,93 @@ let rotateTimer = null // 随机已移除；保留变量让清理里的 clearTim
     }).catch(() => { fallbackPreview(item) })
   }
 
-  // ---- 音量 / 静音状态应用到当前 video ----
-  // forceMuted 仅在「用户未交互发声」阶段使用：视频最初以 muted 加载绕过 autoplay 限制。
-  function applyAudioState(video, forceMuted = false) {
-    const v = video || currentVideo
-    if (!v) return
+  // ---- scene 低成本复刻：一张「屏幕截图」背景图 +（可选）随机轮播音频 ----
+  // 图片铺满视口；音频从 item.audios 里随机挑一段循环播放，一段放完随机切下一段。
+  function renderSceneSimple(item) {
+    // 背景图
+    if (item.image) {
+      const img = document.createElement('img')
+      img.className = 'wp-scene-bg'
+      img.alt = ''
+      img.src = mediaUrl(item.id, item.image)
+      img.addEventListener('error', () => { console.warn('[wallpapers] 场景背景图加载失败', item.image) })
+      layer.appendChild(img)
+    }
+    // 音频（可选）：无音频则纯图壁纸，不播声音。
+    const tracks = Array.isArray(item.audios) ? item.audios.filter(Boolean) : []
+    if (tracks.length === 0) {
+      stopCurrentMedia()
+      return
+    }
+    // 单例播放器：首次创建，之后复用；只听一次 ended/error（切壁纸不重建元素，避免自动播放拦截）。
+    if (audioEl === null) {
+      audioEl = document.createElement('audio')
+      audioEl.setAttribute('playsinline', '')
+      audioEl.addEventListener('ended', onAudioEnded)
+      audioEl.addEventListener('error', () => { console.warn('[wallpapers] 场景音频加载失败') })
+    }
+    currentAudio = audioEl
+    audioCtx = { itemId: item.id, tracks, idx: -1 }
+    audioTrackNext()
+  }
+
+  // ---- 音量 / 静音状态应用到当前 video / audio ----
+  // forceMuted 仅在「用户未交互发声」阶段使用：媒体最初以 muted 加载绕过 autoplay 限制。
+  function applyAudioStateMuted(el, forceMuted) {
     const inBackground = !pageActive
     const shouldMute = forceMuted || volume === 0 || (muteOnBlur && inBackground)
-    if (v.muted !== shouldMute) v.muted = shouldMute
-    v.volume = volume / 100
+    if (el.muted !== shouldMute) el.muted = shouldMute
+    el.volume = volume / 100
+  }
+  function applyAudioState(video, forceMuted = false) {
+    const v = video || currentVideo
+    if (v) applyAudioStateMuted(v, forceMuted)
+    if (currentAudio) applyAudioStateMuted(currentAudio, forceMuted)
+  }
+
+  // 停止并卸载当前正在播放的媒体（切壁纸/无壁纸时调用，确保旧音频真正停下，不再叠加播放）。
+  // scene 的 <audio> 从未 append 进 DOM，layer.innerHTML='' 清不到它，必须显式 pause + 卸载。
+  function stopCurrentMedia() {
+    if (currentVideo) {
+      currentVideo.pause()
+      currentVideo.removeAttribute('src')
+      currentVideo.load()
+      currentVideo = null
+    }
+    // 单例 audio：只停播 + 清 src，不销毁元素（销毁重建会再次触发浏览器自动播放拦截）。
+    // 注意不要对 audioEl 调 load()：load() 会重置元素、可能清除「已授权自动播放」标志而再次被拦。
+    if (audioEl) {
+      audioEl.pause()
+      audioEl.removeAttribute('src')
+    }
+    audioCtx = null
+    currentAudio = null
+  }
+
+  // 播放 audioCtx 里的下一段：单段循环，多段随机（排除当前，避免连续重复）。
+  function audioTrackNext() {
+    if (!audioEl || !audioCtx) return
+    const tracks = audioCtx.tracks
+    if (!Array.isArray(tracks) || tracks.length === 0) return
+    let next
+    if (tracks.length === 1) {
+      next = tracks[0]
+    } else {
+      let n = Math.floor(Math.random() * tracks.length)
+      if (n === audioCtx.idx && tracks.length > 1) n = (n + 1) % tracks.length
+      next = tracks[n]
+      audioCtx.idx = n
+    }
+    audioEl.src = sceneAudioUrl(audioCtx.itemId, next)
+    // 复用同一元素续播：元素曾在手势下解锁过发声，通常不再被拦；仍套用当前音量/静音。
+    applyAudioStateMuted(audioEl, false)
+    const p = audioEl.play()
+    if (p && p.catch) p.catch(() => {})
+  }
+
+  function onAudioEnded() {
+    if (!audioCtx) return
+    audioTrackNext()
   }
 
   // 根据窗口/页面可见性刷新当前视频静音（离开网页时静音的开关在此生效）。
@@ -352,6 +447,7 @@ let rotateTimer = null // 随机已移除；保留变量让清理里的 clearTim
     layer.innerHTML = ''
     layer.classList.remove('wp-scene')
     sceneGen++ // 旧 scene fetch 失效
+    stopCurrentMedia() // 先停掉旧 video/audio（旧 scene 的音频若不显式停会叠加播放）
     const resolved = resolveSelection(selected, catalog.playable)
     if (resolved === NONE_ID) {
         layer.style.display = 'none' // 无壁纸：隐藏黑色背景层，避免盖住界面文字（bug 修复）
@@ -363,6 +459,7 @@ let rotateTimer = null // 随机已移除；保留变量让清理里的 clearTim
       }
       layer.style.pointerEvents = 'none'
       currentVideo = null
+      currentAudio = null
       return
     }
     const item = findItem(catalog.playable, resolved)
@@ -376,6 +473,7 @@ let rotateTimer = null // 随机已移除；保留变量让清理里的 clearTim
       }
       layer.style.pointerEvents = 'none'
       currentVideo = null
+      currentAudio = null
       return
     }
 
@@ -388,6 +486,8 @@ let rotateTimer = null // 随机已移除；保留变量让清理里的 clearTim
       document.body.style.backgroundImage = 'none'
     }
 
+    currentVideo = null
+    currentAudio = null
     if (item.kind === 'video') {
       const v = document.createElement('video')
       v.setAttribute('autoplay', '')
@@ -401,7 +501,10 @@ let rotateTimer = null // 随机已移除；保留变量让清理里的 clearTim
       const p = v.play()
       if (p && p.catch) p.catch(() => {})
       layer.appendChild(v)
-    } // web/scene 不再支持（catalog 已不产出，仅剩 video）
+    } else if (item.kind === 'scene') {
+      // scene 低成本复刻：屏幕截图背景图 +（可选）随机轮播音频
+      renderSceneSimple(item)
+    } // web 已弃用（catalog 不产出）
       
       
       
@@ -602,6 +705,7 @@ let rotateTimer = null // 随机已移除；保留变量让清理里的 clearTim
     window.removeEventListener('blur', onWinBlur)
     window.removeEventListener('focus', onWinFocus)
     currentVideo = null
+    currentAudio = null
     document.body.removeAttribute('data-wallpapers-active')
     document.body.style.removeProperty('--wp-glass')
     if (savedBodyBg !== null) {

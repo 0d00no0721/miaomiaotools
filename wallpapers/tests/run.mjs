@@ -59,12 +59,19 @@ ok(isMetaSelection(NONE_ID), 'none 是元选择')
 ok(isMetaSelection(RANDOM_ID), 'random 是元选择')
 ok(!isMetaSelection('1'), '具体 id 不是元选择')
 
-// ---- normalizeCatalog 含 scene（已弃用，归 unsupported）----
+// ---- normalizeCatalog 含 scene（低成本复刻，进 playable）----
 {
-    const n = normalizeCatalog({ items: [{ id: '9', title: 'S', kind: 'scene', file: '', preview: '' }] })
-    eq(n.playable.length, 0, 'scene 项已弃用，不进 playable')
-    eq(n.unsupportedCount, 1, 'scene 计入 unsupported')
-    
+    const n = normalizeCatalog({ items: [{ id: '9', title: 'S', kind: 'scene', file: '', preview: 'p.jpg', image: '屏幕截图.png', audios: ['a.mp3', null, 'b.flac'] }] })
+    eq(n.playable.length, 1, 'scene 项进入 playable')
+    eq(n.playable[0].kind, 'scene', 'scene kind 保留')
+    eq(n.playable[0].image, '屏幕截图.png', 'scene 背景图透传')
+    eq(n.playable[0].audios, ['a.mp3', 'b.flac'], 'scene 音频列表过滤 null 并转字符串')
+    eq(n.unsupportedCount, 0, 'scene 不计入 unsupported')
+  }
+{
+    const n = normalizeCatalog({ items: [{ id: '10', title: 'T', kind: 'scene', image: '', audios: undefined }] })
+    eq(n.playable[0].image, '', 'scene image 空串兜底')
+    eq(n.playable[0].audios, [], 'scene audios 缺失兜底空数组')
   }
 
   // ---- isSafeRel：允许 output/<id> 这类多段相对路径（供 /media 访问 scene 素材） ----

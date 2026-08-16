@@ -2,7 +2,9 @@
 // 纯 Node，零依赖；只读本地目录。可播放类型：
 //   video/Video → 单个 .mp4（浏览器 <video> 直接播放）
 //   web/Web    → 已弃用（用户拍板），归入 unsupported，不进入可播放列表
-//   scene/Scene → 已弃用（用户拍板），归入 unsupported，不进入可播放列表
+//   scene/Scene → 低成本复刻：用户在与 .pkg 同级的目录里放一张文件名含「屏幕截图」的图片
+//                作为背景；音频从 output/<id>/sounds/ 读取（可选；无音频则纯图壁纸）。
+//                没有「屏幕截图」图片的 scene 直接忽略。
 // 其余（preset 依赖型、dxs 骨骼动画）暂不支持，仅作占位/提示列出。
 import { readdirSync, readFileSync, existsSync, statSync } from 'node:fs'
 import { join } from 'node:path'
@@ -67,9 +69,55 @@ function locateMedia(itemDir, declaredFile) {
   return null
 }
 
+// 音频扩展名集合（scene 复刻：从 output/<id>/sounds 读取）。
+const AUDIO_EXTS = new Set(['.mp3', '.flac', '.ogg', '.wav', '.m4a'])
+
+// scene 复刻：背景图扩展名集合。
+const IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp'])
+
+/**
+ * 在 itemDir 里找一张「用户放置的背景图」：文件名含「屏幕截图」的图片。
+ * 返回相对文件名（不含路径），无则返回 null。
+ */
+function findScreenshot(itemDir) {
+  let entries = []
+  try { entries = readdirSync(itemDir) } catch { return null }
+  for (const name of entries) {
+    if (!name.includes('屏幕截图')) continue
+    const dot = name.lastIndexOf('.')
+    if (dot === -1) continue
+    const ext = name.slice(dot).toLowerCase()
+    if (!IMAGE_EXTS.has(ext)) continue
+    const p = join(itemDir, name)
+    try { if (statSync(p).isFile()) return name } catch {}
+  }
+  return null
+}
+
+/**
+ * 列出 output/<id>/sounds 目录下的全部音频文件名（相对 sounds 目录，仅 basename）。
+ * 无目录或无音频返回 []。
+ */
+function listSounds(rootDir, id) {
+  const soundsDir = join(rootDir, UNPACKED_DIR_NAME, id, 'sounds')
+  let entries = []
+  try { entries = readdirSync(soundsDir) } catch { return [] }
+  const out = []
+  for (const name of entries) {
+    const dot = name.lastIndexOf('.')
+    if (dot === -1) continue
+    const ext = name.slice(dot).toLowerCase()
+    if (!AUDIO_EXTS.has(ext)) continue
+    const p = join(soundsDir, name)
+    try { if (statSync(p).isFile()) out.push(name) } catch {}
+  }
+  out.sort()
+  return out
+}
+
 /**
  * 扫描壁纸根目录，返回可播放清单条目数组。
- * 每项：{ id, title, kind: 'video'|'web'|'unsupported', file, preview }。
+ * 每项：{ id, title, kind: 'video'|'scene'|'unsupported', file, preview, image?, audios? }。
  */
 export function scanCatalog(rootDir = DEFAULT_WALLPAPER_DIR) {
   if (!existsSync(rootDir)) return { ok: false, error: `壁纸目录不存在：${rootDir}`, items: [] }
@@ -107,24 +155,17 @@ export function scanCatalog(rootDir = DEFAULT_WALLPAPER_DIR) {
       continue
     }
 
-// --- scene 类型（.pkg）：已按用户拍板弃用（preview 256×256 过糊、图层重建丢动画），
-  //   不再进入可播放列表，与 preset 依赖型一并计入 unsupported 占位。SCENE_PATH 路由与
-  //   src/scene.mjs 保留为将来可能恢复的残余（无副作用）。 ---
-// 分支仍保留，仅让 scene 归入 unsupported 计数（item 无 kind 字段，client 端
-  // normalizeCatalog 会将其判为非 video/web → unsupported）。scene 永远不进可播放列表。
-if (prj.type === 'scene') {
-      
-        
-        
-        items.push({
-          id,
-          title,
-          
-          file: '',
-          
-        })
-        continue
-      }
+    // --- scene 类型（.pkg）：低成本复刻 ---
+    // 规则（用户拍板）：仅当用户在与 .pkg 同级的目录里放了一张文件名含「屏幕截图」的图片，
+    // 这个 scene 才进入可播放列表（kind:'scene'）；否则直接忽略（不进 unsupported 计数）。
+    // 音频（可选）从 output/<id>/sounds/ 读取，一段放完客户端随机切下一段；无音频则纯图壁纸。
+    if (prj.type === 'scene') {
+      const img = findScreenshot(itemDir)
+      if (img === null) continue // 没有「屏幕截图」图片 → 该 scene 我不要
+      const audios = listSounds(rootDir, id)
+      items.push({ id, title, kind: 'scene', file: '', preview: prj.preview || '', image: img, audios })
+      continue
+    }
     // --- preset 依赖型 / 其他：暂不支持播放，但列出（供占位/提示） ---
     items.push({ id, title, kind: 'unsupported', file: '', preview: prj.preview || '' })
   }
@@ -141,6 +182,7 @@ const MIME = {
   '.json': 'application/json; charset=utf-8', '.json-tex': 'application/json; charset=utf-8',
   '.woff': 'font/woff', '.woff2': 'font/woff2', '.ttf': 'font/ttf',
   '.mp3': 'audio/mpeg', '.ogg': 'audio/ogg', '.flac': 'audio/flac',
+  '.wav': 'audio/wav', '.m4a': 'audio/mp4', '.bmp': 'image/bmp',
 }
 
 /** 按扩展名映射 content-type，未知返回 octet-stream。 */

@@ -6,19 +6,21 @@
 
 - 扫描指定目录（Wallpaper Engine 创意工坊目录形态，读 `project.json`），识别可播放项：
   - `video` / `Video`：单个 `.mp4`（浏览器 `<video>` 直接播放）
-（`web`/`Web` 与 `scene`/`Scene` 型已按用户拍板**彻底弃用**，不再进入可播放列表，仅计入 unsupported 提示数。）
+  - `scene` / `Scene`（**低成本复刻**）：用户在与 `.pkg` 同级的目录里放一张文件名含「屏幕截图」的图片作为背景；音频（可选）自动从 `output/<id>/sounds/` 读取，一段放完随机切下一段；无音频则纯图壁纸、不播声音；没有「屏幕截图」图片的 scene 直接忽略。
+  - `web`/`Web` 型已按用户拍板**彻底弃用**，仅计入 unsupported 提示数。
 - 右下角悬浮按钮（🖼）打开面板：无壁纸 / 具体壁纸列表。
 - 展示模式固定为**全屏**（盖在最底层全屏铺开，不遮挡界面文字）。
 - 面板顶部第二行提供**音量滑杆**（0–100%，拖动即发声）与**「离开此网页时静音」开关**。
 - 选择、音量、静音开关用 `localStorage` 记忆。
-- preset 依赖型、web、scene 一并仅在面板提示数量（列表不显示、不可选）。
+- preset 依赖型、web 一并仅在面板提示数量（列表不显示、不可选）。
 
 ## 目录配置
 
 默认扫描 `E:\SteamLibrary\steamapps\workshop\content\431960`，可用环境变量 `DSH_WALLPAPERS_DIR` 覆盖（见 `src/catalog.mjs`）。
 
-场景型（`.pkg`）与网页型（`index.html`）壁纸均已弃用，不再进入可播放列表。`src/scene.mjs` 与
-`SCENE_PATH` / `ITEM_PATH` 路由保留为将来可能恢复的残余（无副作用），client 端不会请求/渲染。
+场景型（`.pkg`）现以**低成本复刻**方式支持：画面用你放在同级目录的「屏幕截图」图片，音频（可选）
+从 `output/<id>/sounds/` 随机轮播。网页型（`index.html`）仍弃用。`src/scene.mjs` 与
+`SCENE_PATH` / `ITEM_PATH` 路由保留为残余（无副作用，client 端不会请求/渲染）。
 
 ## 结构
 

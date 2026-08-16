@@ -5,7 +5,7 @@
 //   GET /wallpapers/item?item=     → 托管 web 壁纸的入口 html（供 iframe）
 import { readFileSync, createReadStream, existsSync, statSync } from 'node:fs'
 import { join, sep } from 'node:path'
-import { CATALOG_PATH, MEDIA_PATH, ITEM_PATH, SCENE_PATH } from './src/routes.mjs'
+import { CATALOG_PATH, MEDIA_PATH, ITEM_PATH, SCENE_PATH, SCENE_AUDIO_PATH } from './src/routes.mjs'
 import { DEFAULT_WALLPAPER_DIR, UNPACKED_DIR_NAME, scanCatalog, contentTypeFor, isSafeRel } from './src/catalog.mjs'
 import { parseScene } from './src/scene.mjs'
 /**
@@ -47,7 +47,7 @@ function parseRange(rangeHeader, size) {
   return { start, end }
 }
 
-export { CATALOG_PATH, MEDIA_PATH, ITEM_PATH, SCENE_PATH } from './src/routes.mjs'
+export { CATALOG_PATH, MEDIA_PATH, ITEM_PATH, SCENE_PATH, SCENE_AUDIO_PATH } from './src/routes.mjs'
 export { DEFAULT_WALLPAPER_DIR } from './src/catalog.mjs'
 
 export const name = 'wallpapers'
@@ -192,6 +192,60 @@ export function apply(ctx) {
           return
         }
         respond(200, result)
+      },
+    })
+
+  // ---- 场景音频托管（限定 output/<id>/sounds/<file>，杜绝目录穿越）----
+    ctx.webServer.register({
+      kind: 'exact',
+      path: SCENE_AUDIO_PATH,
+      handler: (req, res) => {
+        const url = new URL(req.url ?? '/', 'http://x')
+        const item = url.searchParams.get('item')
+        const f = url.searchParams.get('f')
+        const respond = (code, msg) => {
+          res.writeHead(code, { 'content-type': 'text/plain; charset=utf-8' })
+          res.end(msg)
+        }
+        // item 必须是单个安全段（craftId）；f 必须是单个安全段（且不能含路径分隔符）
+        if (!item || !isSafeRel(item)) return respond(400, 'bad item')
+        if (!f || !isSafeRel(f)) return respond(400, 'bad file')
+        const soundsDir = join(DEFAULT_WALLPAPER_DIR, UNPACKED_DIR_NAME, item, 'sounds')
+        // 二次防御：f 必须是站内 basename，解析后必须仍在 soundsDir 内。
+        const abs = join(soundsDir, f)
+        if (!abs.startsWith(soundsDir + sep)) return respond(400, 'bad path')
+        try {
+          if (!existsSync(abs) || !statSync(abs).isFile()) return respond(404, 'not found')
+          const stat = statSync(abs)
+          const size = stat.size
+          const type = contentTypeFor(f)
+          const range = parseRange(req.headers.range, size)
+          if (range === -1) {
+            res.writeHead(416, { 'content-range': `bytes */${size}` })
+            res.end()
+            return
+          }
+          if (range === null) {
+            res.writeHead(200, {
+              'content-type': type,
+              'content-length': size,
+              'accept-ranges': 'bytes',
+              'cache-control': 'no-cache',
+            })
+            createReadStream(abs).on('error', () => { if (!res.headersSent) res.writeHead(500); res.end() }).pipe(res)
+            return
+          }
+          res.writeHead(206, {
+            'content-type': type,
+            'content-range': `bytes ${range.start}-${range.end}/${size}`,
+            'content-length': range.end - range.start + 1,
+            'accept-ranges': 'bytes',
+            'cache-control': 'no-cache',
+          })
+          createReadStream(abs, { start: range.start, end: range.end }).on('error', () => { if (!res.headersSent) res.writeHead(500); res.end() }).pipe(res)
+        } catch {
+          respond(404, 'not found')
+        }
       },
     })
 }
