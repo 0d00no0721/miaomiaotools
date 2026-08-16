@@ -1,7 +1,7 @@
-// wallpapers 浏览器 half：全屏动态背景（视频/网页）+ 悬浮壁纸面板。
-// 注：scene 型壁纸已按用户拍板彻底弃用 —— catalog 不再产生 scene 可播放项，
-// 下述 scene 渲染函数（renderSceneDead/compositeLayers/fallbackPreview 等）为保留的
-// 死代码（无任何调用链触达），仅为将来可能恢复留底；不要误以为 scene 仍被支持。
+// wallpapers 浏览器 half：全屏动态背景（视频 / 场景低成本复刻）+ 悬浮壁纸面板。
+// 注：scene 现以「图片 + audio.json 音频清单」低成本复刻方式支持，音频随机轮播。
+// 下述 renderSceneDead/compositeLayers/fallbackPreview 等为保留的死代码（无调用链触达），
+// 仅为将来可能恢复完整 scene 图层重建留底；不要误以为它们当前被调用。
 // 标准 bundle client 形态：exports { name, apply } 经 __ModuleLoader__.load 注册，
 // 由 client 内核挂载时调用 apply(ctx)。ctx 仅可选消费；缺席时降级（背景照常跑）。
 // 纯 DOM 自渲染，不依赖 React / settings 页 / api-proxy 白名单。
@@ -183,8 +183,13 @@ let rotateTimer = null // 随机已移除；保留变量让清理里的 clearTim
   function sceneUrl(item) {
     return `${SCENE_PATH}?item=${encodeURIComponent(item)}`
   }
-  function sceneAudioUrl(item, file) {
-    return `${SCENE_AUDIO_PATH}?item=${encodeURIComponent(item)}&f=${encodeURIComponent(file)}`
+  // 音频 URL：路径以 'sounds/' 开头 → 解包音频走 /scene-audio；否则相对 item 目录走 /media。
+  function audioUrl(itemId, track) {
+    if (track.startsWith('sounds/')) {
+      const base = track.slice('sounds/'.length)
+      return `${SCENE_AUDIO_PATH}?item=${encodeURIComponent(itemId)}&f=${encodeURIComponent(base)}`
+    }
+    return mediaUrl(itemId, track)
   }
 
   // 场景壁纸：把 "r g b" 这种 0-1 浮点颜色转成 CSS rgb()
@@ -338,7 +343,7 @@ let rotateTimer = null // 随机已移除；保留变量让清理里的 clearTim
       next = tracks[n]
       audioCtx.idx = n
     }
-    audioEl.src = sceneAudioUrl(audioCtx.itemId, next)
+    audioEl.src = audioUrl(audioCtx.itemId, next)
     // 复用同一元素续播：元素曾在手势下解锁过发声，通常不再被拦；仍套用当前音量/静音。
     applyAudioStateMuted(audioEl, false)
     const p = audioEl.play()
@@ -543,7 +548,7 @@ let rotateTimer = null // 随机已移除；保留变量让清理里的 clearTim
     if (catalog.playable.length === 0) {
       const e = document.createElement('div')
       e.className = 'wp-empty'
-      e.textContent = '未发现可播放的壁纸（视频）'
+      e.textContent = '未发现可播放的壁纸（视频 / 场景）'
       panel.appendChild(e)
     } else {
       for (const it of catalog.playable) {
@@ -569,7 +574,7 @@ let rotateTimer = null // 随机已移除；保留变量让清理里的 clearTim
     if (catalog.unsupportedCount > 0) {
       const note = document.createElement('div')
       note.className = 'wp-empty'
-      note.textContent = `${catalog.unsupportedCount} 个壁纸暂不支持（web / scene / preset 依赖型等）`
+      note.textContent = `${catalog.unsupportedCount} 个壁纸暂不支持（web 原生渲染 / preset 依赖型等）`
       panel.appendChild(note)
     }
   }

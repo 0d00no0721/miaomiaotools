@@ -1,10 +1,10 @@
 // 壁纸目录扫描：解析 Wallpaper Engine 创意工坊目录（project.json）为可播放清单。
 // 纯 Node，零依赖；只读本地目录。可播放类型：
 //   video/Video → 单个 .mp4（浏览器 <video> 直接播放）
-//   web/Web    → 已弃用（用户拍板），归入 unsupported，不进入可播放列表
-//   scene/Scene → 低成本复刻：用户在与 .pkg 同级的目录里放一张文件名含「屏幕截图」的图片
-//                作为背景；音频从 output/<id>/sounds/ 读取（可选；无音频则纯图壁纸）。
-//                没有「屏幕截图」图片的 scene 直接忽略。
+//   scene/Scene 与 web/Web 等其他类型 → 低成本复刻：用户在与 project.json 同级的目录里
+//                放一张文件名含「屏幕截图」的图片作为背景；音频由同目录 audio.json 清单
+//                指定（相对项目目录路径；sounds/ 前缀表示解包音频）。无截图 → 忽略；
+//                无音频清单 → 纯图壁纸不播声。web 原生渲染（iframe live2d 等）不再支持。
 // 其余（preset 依赖型、dxs 骨骼动画）暂不支持，仅作占位/提示列出。
 import { readdirSync, readFileSync, existsSync, statSync } from 'node:fs'
 import { join } from 'node:path'
@@ -69,7 +69,7 @@ function locateMedia(itemDir, declaredFile) {
   return null
 }
 
-// 音频扩展名集合（scene 复刻：从 output/<id>/sounds 读取）。
+// 音频扩展名集合（暂未参与清单校验；保留以兼容将来按扩展名过滤的需求）。
 const AUDIO_EXTS = new Set(['.mp3', '.flac', '.ogg', '.wav', '.m4a'])
 
 // scene 复刻：背景图扩展名集合。
@@ -94,24 +94,24 @@ function findScreenshot(itemDir) {
   return null
 }
 
+/** 音频清单文件名（相对 item 目录）：{ audios: [相对路径, ...] }。 */
+const AUDIO_MANIFEST_NAME = 'audio.json'
+
 /**
- * 列出 output/<id>/sounds 目录下的全部音频文件名（相对 sounds 目录，仅 basename）。
- * 无目录或无音频返回 []。
+ * 读 item 目录下的 audio.json，返回用户显式指定的音频相对路径数组。
+ * 格式：{ audios: ["assets/audio/Theme_339.ogg", ...] }（相对 item 目录，多段路径）。
+ * 无清单 / 解析失败 / audios 非数组 / 相对路径不安全 → 返回 []（纯图壁纸，不播声）。
  */
-function listSounds(rootDir, id) {
-  const soundsDir = join(rootDir, UNPACKED_DIR_NAME, id, 'sounds')
-  let entries = []
-  try { entries = readdirSync(soundsDir) } catch { return [] }
+function readAudioManifest(itemDir) {
+  const mp = join(itemDir, AUDIO_MANIFEST_NAME)
+  if (!existsSync(mp)) return []
+  let m
+  try { m = JSON.parse(readFileSync(mp, 'utf8')) } catch { return [] }
+  const audios = Array.isArray(m?.audios) ? m.audios : []
   const out = []
-  for (const name of entries) {
-    const dot = name.lastIndexOf('.')
-    if (dot === -1) continue
-    const ext = name.slice(dot).toLowerCase()
-    if (!AUDIO_EXTS.has(ext)) continue
-    const p = join(soundsDir, name)
-    try { if (statSync(p).isFile()) out.push(name) } catch {}
+  for (const a of audios) {
+    if (typeof a === 'string' && isSafeRel(a)) out.push(a)
   }
-  out.sort()
   return out
 }
 
@@ -138,9 +138,16 @@ export function scanCatalog(rootDir = DEFAULT_WALLPAPER_DIR) {
     const id = name
     const title = prj.title || id
 
-    // --- web 类型：已按用户拍板弃用，归入 unsupported（不再进可播放列表） ---
+    // --- web 类型：已按用户拍板弃用 web 原生渲染（iframe live2d 等）---
+    // 但若用户在该目录放了「屏幕截图」图片，则按「图+音频清单」低成本复刻（见下方 scene 规则）。
     if (prj.type === 'web') {
-      items.push({ id, title, kind: 'unsupported', file: '', preview: prj.preview || '' })
+      const img = findScreenshot(itemDir)
+      if (img === null) {
+        items.push({ id, title, kind: 'unsupported', file: '', preview: prj.preview || '' })
+        continue
+      }
+      const audios = readAudioManifest(itemDir)
+      items.push({ id, title, kind: 'scene', file: '', preview: prj.preview || '', image: img, audios })
       continue
     }
 
@@ -155,14 +162,13 @@ export function scanCatalog(rootDir = DEFAULT_WALLPAPER_DIR) {
       continue
     }
 
-    // --- scene 类型（.pkg）：低成本复刻 ---
-    // 规则（用户拍板）：仅当用户在与 .pkg 同级的目录里放了一张文件名含「屏幕截图」的图片，
-    // 这个 scene 才进入可播放列表（kind:'scene'）；否则直接忽略（不进 unsupported 计数）。
-    // 音频（可选）从 output/<id>/sounds/ 读取，一段放完客户端随机切下一段；无音频则纯图壁纸。
+    // --- scene 类型（.pkg）：低成本复刻（图 + 音频清单）---
+    // 规则（用户拍板）：用户在与 .pkg 同级的目录里放一张文件名含「屏幕截图」的图片 +（可选）audio.json 清单。
+    // 有截图 → kind:'scene' 进可播放；无截图 → 忽略。音频仅取 audio.json 列出的（缺失/为空 → 纯图不播声）。
     if (prj.type === 'scene') {
       const img = findScreenshot(itemDir)
       if (img === null) continue // 没有「屏幕截图」图片 → 该 scene 我不要
-      const audios = listSounds(rootDir, id)
+      const audios = readAudioManifest(itemDir)
       items.push({ id, title, kind: 'scene', file: '', preview: prj.preview || '', image: img, audios })
       continue
     }
