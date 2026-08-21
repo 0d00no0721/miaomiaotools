@@ -1,0 +1,4 @@
+# restore-archived bundle patch: mount the panel plugin into the official UI.
+- insert:
+    - id: restore-archived
+      name: restore-archived

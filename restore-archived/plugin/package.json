@@ -1,0 +1,37 @@
+{
+  "name": "restore-archived",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "在 DSH Web UI 左下角提供「恢复归档的对话」入口",
+  "main": "./index.mjs",
+  "exports": {
+    ".": "./index.mjs",
+    "./client": "./client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
+    }
+  },
+  "scripts": {
+    "build:client": "node scripts/build-client.mjs",
+    "check:client": "node scripts/build-client.mjs --check",
+    "test": "node tests/run.mjs"
+  },
+  "files": [
+    "cordis.patch.yml",
+    "index.mjs",
+    "client",
+    "client.js",
+    "scripts",
+    "tests",
+    "README.md"
+  ],
+  "license": "MIT"
+}

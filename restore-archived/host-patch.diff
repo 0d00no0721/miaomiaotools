@@ -1,0 +1,418 @@
+diff --git a/packages/client/connection/src/client/fixture.ts b/packages/client/connection/src/client/fixture.ts
+index dd05664..9bf1f43 100644
+--- a/packages/client/connection/src/client/fixture.ts
++++ b/packages/client/connection/src/client/fixture.ts
+@@ -2694,6 +2694,15 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
+         }
+         return ok(request, { archivedSessionIds: [...archivedSessionIds] })
+       },
++      unarchiveSession: (request) => {
++        const { sessionId } = request.payload
++        const index = archivedSessionIds.indexOf(sessionId)
++        if (index !== -1) {
++          archivedSessionIds.splice(index, 1)
++          emitHost({ type: 'host/archived-sessions-changed', archivedSessionIds: [...archivedSessionIds] })
++        }
++        return ok(request, { archivedSessionIds: [...archivedSessionIds] })
++      },
+     },
+     agentPresets: {
+       // Both trusts appear, because a surface must present a locally authored
+@@ -3105,6 +3114,7 @@ export class FixtureApiClient extends AbstractApiClient {
+       case 'workspace.insertBefore': return this.api.workspace.insertBefore(request)
+       case 'workspace.insertSessionBefore': return this.api.workspace.insertSessionBefore(request)
+       case 'workspace.archiveSession': return this.api.workspace.archiveSession(request)
++      case 'workspace.unarchiveSession': return this.api.workspace.unarchiveSession(request)
+       case 'skill.list': return this.api.skills.list(request)
+       case 'agentPreset.list': return this.api.agentPresets.list(request)
+       case 'agentPreset.select': return this.api.agentPresets.select(request)
+diff --git a/packages/client/connection/tests/fake-api.client.ts b/packages/client/connection/tests/fake-api.client.ts
+index bee4fc0..0285042 100644
+--- a/packages/client/connection/tests/fake-api.client.ts
++++ b/packages/client/connection/tests/fake-api.client.ts
+@@ -167,6 +167,9 @@ export class FakeApiClient implements IApiClient {
+     archiveSession: (payload: unknown) => this.record('workspace.archiveSession', payload, Promise.resolve(ok({
+       archivedSessionIds: [(payload as { sessionId: SessionId }).sessionId],
+     }))),
++    unarchiveSession: (payload: unknown) => this.record('workspace.unarchiveSession', payload, Promise.resolve(ok({
++      archivedSessionIds: [],
++    }))),
+   }
+ 
+   // Payloads stay `unknown` (lint-lane note above); response rows are the real
+diff --git a/packages/client/runtime/src/client/contract/workspaces.ts b/packages/client/runtime/src/client/contract/workspaces.ts
+index 4012086..0ddc2f5 100644
+--- a/packages/client/runtime/src/client/contract/workspaces.ts
++++ b/packages/client/runtime/src/client/contract/workspaces.ts
+@@ -91,4 +91,9 @@ export interface IWorkspaces {
+    * @param sessionId - session to archive.
+    */
+   archiveSession(sessionId: SessionId): Promise<void>
++  /**
++   * Restore one archived session (idempotent/silent on the host side).
++   * @param sessionId - session to restore.
++   */
++  unarchiveSession(sessionId: SessionId): Promise<void>
+ }
+diff --git a/packages/client/runtime/src/client/workspaces/manager.ts b/packages/client/runtime/src/client/workspaces/manager.ts
+index 9b54dbb..c5aad3d 100644
+--- a/packages/client/runtime/src/client/workspaces/manager.ts
++++ b/packages/client/runtime/src/client/workspaces/manager.ts
+@@ -231,6 +231,18 @@ export class WorkspaceManager {
+     return result
+   }
+ 
++  /**
++   * Restore one archived session, then install the returned full archive set
++   * without waiting for the changed frame.
++   * @param sessionId - session to restore.
++   * @returns the wire result.
++   */
++  async unarchiveSession(sessionId: SessionId): Promise<RpcResult<{ archivedSessionIds: SessionId[] }>> {
++    const { result } = await this.api.workspace.unarchiveSession({ sessionId })
++    if (result.ok) this.installArchived(result.value.archivedSessionIds)
++    return result
++  }
++
+   /**
+    * Host-frame entry. Non-workspace frames are ignored so the runtime can
+    * fan one host stream out to both object managers.
+diff --git a/packages/client/runtime/src/client/workspaces/service.ts b/packages/client/runtime/src/client/workspaces/service.ts
+index c23e3b3..d6ae939 100644
+--- a/packages/client/runtime/src/client/workspaces/service.ts
++++ b/packages/client/runtime/src/client/workspaces/service.ts
+@@ -292,6 +292,15 @@ export class WorkspaceRuntime implements IWorkspaces {
+     if (!result.ok) throw new Error(`session archive failed: ${result.error.code}: ${result.error.message}`)
+   }
+ 
++  /**
++   * Restore one archived session (host-side idempotent/silent).
++   * @param sessionId - session to restore.
++   */
++  async unarchiveSession(sessionId: SessionId): Promise<void> {
++    const result = await this.manager.unarchiveSession(sessionId)
++    if (!result.ok) throw new Error(`session restore failed: ${result.error.code}: ${result.error.message}`)
++  }
++
+   /**
+    * Move a session within its Workspace's manual order (DOM-insertBefore-like).
+    * @param workspaceId - owning workspace.
+diff --git a/packages/client/runtime/tests/fake-api.client.ts b/packages/client/runtime/tests/fake-api.client.ts
+index 33a0efb..e8acb80 100644
+--- a/packages/client/runtime/tests/fake-api.client.ts
++++ b/packages/client/runtime/tests/fake-api.client.ts
+@@ -204,6 +204,9 @@ export class FakeApiClient implements IApiClient {
+   onWorkspaceArchiveSession: (payload: unknown) => Promise<RpcResponse<{ archivedSessionIds: SessionId[] }>> =
+     payload => Promise.resolve(ok({ archivedSessionIds: [(payload as { sessionId: SessionId }).sessionId] }))
+ 
++  onWorkspaceUnarchiveSession: (payload: unknown) => Promise<RpcResponse<{ archivedSessionIds: SessionId[] }>> =
++    () => Promise.resolve(ok({ archivedSessionIds: [] }))
++
+   readonly workspace: IApiClient['workspace'] = {
+     list: (payload: unknown) => this.record('workspace.list', payload, this.onWorkspaceList(payload).then(response => (
+       response.result.ok
+@@ -219,6 +222,8 @@ export class FakeApiClient implements IApiClient {
+       this.record('workspace.insertSessionBefore', payload, this.onWorkspaceInsertSessionBefore(payload)),
+     archiveSession: (payload: unknown) =>
+       this.record('workspace.archiveSession', payload, this.onWorkspaceArchiveSession(payload)),
++    unarchiveSession: (payload: unknown) =>
++      this.record('workspace.unarchiveSession', payload, this.onWorkspaceUnarchiveSession(payload)),
+   }
+ 
+   // Payloads stay `unknown` (lint-lane note above); response rows are the real
+diff --git a/packages/host/apiproxy/src/api-proxy.ts b/packages/host/apiproxy/src/api-proxy.ts
+index bda9936..451b661 100644
+--- a/packages/host/apiproxy/src/api-proxy.ts
++++ b/packages/host/apiproxy/src/api-proxy.ts
+@@ -124,7 +124,7 @@ const DEFAULT_MAX_MESSAGES = 50
+  * is deferred work.
+  */
+ const WEB_SETTINGS_NAMESPACES = [
+-  'agent-loop', 'shell', 'locale', 'permission', 'ui-conversation', 'ui-theme', 'web-search-deepseek',
++  'agent-loop', 'shell', 'locale', 'permission', 'ui-conversation', 'ui-theme', 'ui-skin-studio', 'web-search-deepseek',
+ ] as const
+ 
+ /** Provider work budget: at most 100 calls and 2,000 inspected hits. */
+@@ -2918,6 +2918,13 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
+         }
+         return ok(request, { archivedSessionIds: [...ctx.workspaceRegistry.archivedSessionIds] })
+       },
++
++      async unarchiveSession(request) {
++        const { sessionId } = request.payload
++        // Idempotent & silent: the registry resolves unknown/not-archived. Success only.
++        await ctx.workspaceRegistry.unarchiveSession(sessionId)
++        return ok(request, { archivedSessionIds: [...ctx.workspaceRegistry.archivedSessionIds] })
++      },
+     },
+ 
+     host: {
+diff --git a/packages/host/apiproxy/src/api/rpc-map.ts b/packages/host/apiproxy/src/api/rpc-map.ts
+index 80dede1..06a3cd5 100644
+--- a/packages/host/apiproxy/src/api/rpc-map.ts
++++ b/packages/host/apiproxy/src/api/rpc-map.ts
+@@ -50,6 +50,7 @@ export interface RpcMethodMap {
+   'workspace.insertBefore': WorkspaceApi['insertBefore']
+   'workspace.insertSessionBefore': WorkspaceApi['insertSessionBefore']
+   'workspace.archiveSession': WorkspaceApi['archiveSession']
++  'workspace.unarchiveSession': WorkspaceApi['unarchiveSession']
+   'skill.list': SkillsApi['list']
+   'agentPreset.list': AgentPresetsApi['list']
+   'agentPreset.select': AgentPresetsApi['select']
+diff --git a/packages/host/apiproxy/src/api/workspace.schema.ts b/packages/host/apiproxy/src/api/workspace.schema.ts
+index b573051..0f13968 100644
+--- a/packages/host/apiproxy/src/api/workspace.schema.ts
++++ b/packages/host/apiproxy/src/api/workspace.schema.ts
+@@ -98,3 +98,13 @@ export const workspaceArchiveSessionRequestSchema = z.object({
+ export const workspaceArchiveSessionValueSchema = z.object({
+   archivedSessionIds: z.array(sessionIdSchema),
+ }) satisfies z.ZodType<Wire<ResponseValue<'workspace.archiveSession'>>>
++
++/** workspace.unarchiveSession request payload. */
++export const workspaceUnarchiveSessionRequestSchema = z.object({
++  sessionId: sessionIdSchema,
++}) satisfies z.ZodType<Wire<RequestPayload<'workspace.unarchiveSession'>>>
++
++/** workspace.unarchiveSession response value: the full updated archive set. */
++export const workspaceUnarchiveSessionValueSchema = z.object({
++  archivedSessionIds: z.array(sessionIdSchema),
++}) satisfies z.ZodType<Wire<ResponseValue<'workspace.unarchiveSession'>>>
+diff --git a/packages/host/apiproxy/src/api/workspace.ts b/packages/host/apiproxy/src/api/workspace.ts
+index d36d0c4..2ac732d 100644
+--- a/packages/host/apiproxy/src/api/workspace.ts
++++ b/packages/host/apiproxy/src/api/workspace.ts
+@@ -106,4 +106,14 @@ export interface WorkspaceApi {
+    */
+   archiveSession(request: RpcRequest<{ sessionId: SessionId }>):
+   Promise<RpcResponse<{ archivedSessionIds: SessionId[] }>>
++
++  /**
++   * Removes one session from the registry-global archive set so it reappears
++   * on every grouping surface at its retained workspace-accounting position.
++   * Calls are idempotent and never fail: restoring a session outside the
++   * archive set, or restoring while an archive is pending, resolves silently.
++   * Returns the full updated set (same snapshot the changed frame carries).
++   */
++  unarchiveSession(request: RpcRequest<{ sessionId: SessionId }>):
++  Promise<RpcResponse<{ archivedSessionIds: SessionId[] }>>
+ }
+diff --git a/packages/host/apiproxy/src/fetch/client.ts b/packages/host/apiproxy/src/fetch/client.ts
+index 70e3ece..5b4113a 100644
+--- a/packages/host/apiproxy/src/fetch/client.ts
++++ b/packages/host/apiproxy/src/fetch/client.ts
+@@ -33,6 +33,7 @@ import {
+ } from '../api/sessions.schema.ts'
+ import {
+   workspaceArchiveSessionValueSchema,
++  workspaceUnarchiveSessionValueSchema,
+   workspaceCreateValueSchema,
+   workspaceDeleteValueSchema,
+   workspaceInsertBeforeValueSchema,
+@@ -120,6 +121,7 @@ export interface IApiClient {
+     insertBefore(payload: RequestPayload<'workspace.insertBefore'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'workspace.insertBefore'>>>
+     insertSessionBefore(payload: RequestPayload<'workspace.insertSessionBefore'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'workspace.insertSessionBefore'>>>
+     archiveSession(payload: RequestPayload<'workspace.archiveSession'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'workspace.archiveSession'>>>
++    unarchiveSession(payload: RequestPayload<'workspace.unarchiveSession'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'workspace.unarchiveSession'>>>
+   }
+   skills: {
+     list(payload: RequestPayload<'skill.list'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'skill.list'>>>
+@@ -198,6 +200,7 @@ const UNARY_VALUE_SCHEMAS: { [K in keyof RpcMethodMap]: z.ZodType<Wire<ResponseV
+   'workspace.insertBefore': workspaceInsertBeforeValueSchema,
+   'workspace.insertSessionBefore': workspaceInsertSessionBeforeValueSchema,
+   'workspace.archiveSession': workspaceArchiveSessionValueSchema,
++  'workspace.unarchiveSession': workspaceUnarchiveSessionValueSchema,
+   'skill.list': skillListValueSchema,
+   'agentPreset.list': agentPresetListValueSchema,
+   'agentPreset.select': agentPresetSelectValueSchema,
+@@ -451,6 +454,8 @@ export abstract class AbstractApiClient implements IApiClient {
+     insertBefore: (payload, signal) => this.callUnary('workspace.insertBefore', payload, signal),
+     insertSessionBefore: (payload, signal) => this.callUnary('workspace.insertSessionBefore', payload, signal),
+     archiveSession: (payload, signal) => this.callUnary('workspace.archiveSession', payload, signal),
++    unarchiveSession: (payload, signal) => this.callUnary('workspace.unarchiveSession', payload, signal),
++
+   }
+ 
+   readonly skills: IApiClient['skills'] = {
+diff --git a/packages/host/apiproxy/src/fetch/handler.ts b/packages/host/apiproxy/src/fetch/handler.ts
+index 697171e..e0fb8f8 100644
+--- a/packages/host/apiproxy/src/fetch/handler.ts
++++ b/packages/host/apiproxy/src/fetch/handler.ts
+@@ -36,6 +36,7 @@ import {
+ } from '../api/host.schema.ts'
+ import {
+   workspaceArchiveSessionRequestSchema,
++  workspaceUnarchiveSessionRequestSchema,
+   workspaceCreateRequestSchema,
+   workspaceDeleteRequestSchema,
+   workspaceInsertBeforeRequestSchema,
+@@ -116,6 +117,7 @@ const UNARY_ROUTES: UnaryRoutes = {
+   'workspace.insertBefore': { schema: workspaceInsertBeforeRequestSchema, invoke: (api, r) => api.workspace.insertBefore(r) },
+   'workspace.insertSessionBefore': { schema: workspaceInsertSessionBeforeRequestSchema, invoke: (api, r) => api.workspace.insertSessionBefore(r) },
+   'workspace.archiveSession': { schema: workspaceArchiveSessionRequestSchema, invoke: (api, r) => api.workspace.archiveSession(r) },
++  'workspace.unarchiveSession': { schema: workspaceUnarchiveSessionRequestSchema, invoke: (api, r) => api.workspace.unarchiveSession(r) },
+   'skill.list': { schema: skillListRequestSchema, invoke: (api, r) => api.skills.list(r) },
+   'agentPreset.list': { schema: agentPresetListRequestSchema, invoke: (api, r) => api.agentPresets.list(r) },
+   'agentPreset.select': { schema: agentPresetSelectRequestSchema, invoke: (api, r) => api.agentPresets.select(r) },
+diff --git a/packages/host/apiproxy/tests/api-proxy-workspace.spec.ts b/packages/host/apiproxy/tests/api-proxy-workspace.spec.ts
+index 54bdb01..b597daf 100644
+--- a/packages/host/apiproxy/tests/api-proxy-workspace.spec.ts
++++ b/packages/host/apiproxy/tests/api-proxy-workspace.spec.ts
+@@ -567,4 +567,41 @@ describe('Host Workspace increments', () => {
+     })
+     abort.abort()
+   })
++
++  it('restores an archived session into its original workspace slot and streams the set once', async () => {
++    const { api, root } = await harness()
++    const workspace = expectOk(await api.workspace.create(request({ path: stageDir(root, 'unarchive-home') }))).workspace
++    const sessionId = SessionId('session-to-unarchive')
++    expectOk(await api.sessions.create(request({ workspaceId: workspace.workspaceId, sessionId })))
++
++    const abort = new AbortController()
++    const stream: AsyncIterator<RpcRequest<HostFrame>> =
++      api.events.host(request({}), abort.signal)[Symbol.asyncIterator]()
++    const archived = nextHostFrame(stream)
++    expectOk(await api.workspace.archiveSession(request({ sessionId })))
++    expect(await archived).toMatchObject({
++      payload: { type: 'host/archived-sessions-changed', archivedSessionIds: [sessionId] },
++    })
++
++    const changed = nextHostFrame(stream)
++    expect(expectOk(await api.workspace.unarchiveSession(request({ sessionId }))).archivedSessionIds)
++      .toEqual([])
++    expect(await changed).toMatchObject({
++      payload: { type: 'host/archived-sessions-changed', archivedSessionIds: [] },
++    })
++
++    // Accounting preserved untouched across absent: ghost ids resolve silently.
++    const listed = expectOk(await api.workspace.list(request({})))
++    expect(listed.archivedSessionIds).toEqual([])
++    expect(listed.items[0]?.sessionIds).toContain(sessionId)
++    expect(expectOk(await api.workspace.unarchiveSession(request({ sessionId }))).archivedSessionIds)
++      .toEqual([])
++    expect(expectOk(await api.workspace.unarchiveSession(request({ sessionId: SessionId('session-ghost') }))).archivedSessionIds)
++      .toEqual([])
++
++    // An archive-after-unarchive returns the original single entry.
++    expect(expectOk(await api.workspace.archiveSession(request({ sessionId }))).archivedSessionIds)
++      .toEqual([sessionId])
++    abort.abort()
++  })
+ })
+diff --git a/packages/host/apiproxy/tests/client-handler.spec.ts b/packages/host/apiproxy/tests/client-handler.spec.ts
+index 4130d8f..b76d032 100644
+--- a/packages/host/apiproxy/tests/client-handler.spec.ts
++++ b/packages/host/apiproxy/tests/client-handler.spec.ts
+@@ -88,6 +88,7 @@ function scriptedApi(overrides: {
+       insertBefore: r => ok(r, { workspaceIds: [r.payload.workspaceId] }),
+       insertSessionBefore: r => ok(r, { workspace: { workspaceId: 'w1' as never, path: '/t', title: 't', sessionIds: [], createdAt: '0', updatedAt: '0' } }),
+       archiveSession: r => ok(r, { archivedSessionIds: [r.payload.sessionId] }),
++      unarchiveSession: r => ok(r, { archivedSessionIds: [] }),
+     },
+     skills: { list: r => ok(r, { skills: [] }), ...overrides.skills },
+     agentPresets: {
+diff --git a/packages/host/apiproxy/tests/fetch-carrier.spec.ts b/packages/host/apiproxy/tests/fetch-carrier.spec.ts
+index 2000f70..2282b90 100644
+--- a/packages/host/apiproxy/tests/fetch-carrier.spec.ts
++++ b/packages/host/apiproxy/tests/fetch-carrier.spec.ts
+@@ -191,6 +191,9 @@ function fakeApi(overrides: Partial<{ muxFrames: MuxFrame[]; hostFrames: HostFra
+       async archiveSession(request) {
+         return { rpcId: request.rpcId, result: { ok: true, value: { archivedSessionIds: [request.payload.sessionId] } } }
+       },
++      async unarchiveSession(request) {
++        return { rpcId: request.rpcId, result: { ok: true, value: { archivedSessionIds: [] } } }
++      },
+     },
+     agentPresets: {
+       list(request: RpcRequest<{}>) {
+diff --git a/packages/test-support/client-runtime/src/workspaces.ts b/packages/test-support/client-runtime/src/workspaces.ts
+index 4f6b212..d3469c8 100644
+--- a/packages/test-support/client-runtime/src/workspaces.ts
++++ b/packages/test-support/client-runtime/src/workspaces.ts
+@@ -212,4 +212,21 @@ export class TestWorkspaces implements IWorkspaces {
+       draft.archivedSessionIds = [...draft.archivedSessionIds, sessionId]
+     })
+   }
++
++  /**
++   * Restore an archived session (recorded). The default mirrors the
++   * production face's observable effect: the id leaves the archive set.
++   * @param sessionId - session to restore.
++   */
++  async unarchiveSession(sessionId: SessionId): Promise<void> {
++    this.calls.push({ method: 'unarchiveSession', args: [sessionId] })
++    const stub = this.stubs.get('unarchiveSession')
++    if (stub !== undefined) {
++      await (stub(sessionId) as Promise<void>)
++      return
++    }
++    await this.update((draft) => {
++      draft.archivedSessionIds = draft.archivedSessionIds.filter(id => id !== sessionId)
++    })
++  }
+ }
+diff --git a/packages/workspace/workspace/src/index.ts b/packages/workspace/workspace/src/index.ts
+index 87edb28..26ec848 100644
+--- a/packages/workspace/workspace/src/index.ts
++++ b/packages/workspace/workspace/src/index.ts
+@@ -254,6 +254,25 @@ export class WorkspaceRegistry extends Service {
+     })
+   }
+ 
++  /**
++   * Restore one session from the archive set durably. Idempotent and silent:
++   * a session not in the archive set resolves without writing, matching the
++   * archive-side no-op; the session keeps its workspace accounting slot, so
++   * restoring never mutates workspace membership.
++   * @param sessionId - The session to restore.
++   * @returns resolution after durability.
++   */
++  unarchiveSession(sessionId: SessionId): Promise<void> {
++    return this.enqueueOperation(async () => {
++      const state = this.requireState()
++      if (!state.archivedSessionIds.includes(sessionId)) return
++      await this.setState({
++        ...state,
++        archivedSessionIds: state.archivedSessionIds.filter(id => id !== sessionId),
++      })
++    })
++  }
++
+   /**
+    * Whether a session is live, header-indexed, or present in a fresh
+    * persistence listing. Only a definite miss returns false — a failing
+diff --git a/packages/workspace/workspace/tests/workspace.spec.ts b/packages/workspace/workspace/tests/workspace.spec.ts
+index 22900c7..8738144 100644
+--- a/packages/workspace/workspace/tests/workspace.spec.ts
++++ b/packages/workspace/workspace/tests/workspace.spec.ts
+@@ -941,4 +941,30 @@ describe('registry-global session archive', () => {
+     const upgraded = await harness({ pool: legacy })
+     expect(upgraded.registry.archivedSessionIds).toEqual([])
+   })
++
++  it('unarchives durably and removes only the archive-set membership', async () => {
++    const dir = await makeDir('unarchive-home')
++    const result = await harness({ sessions: [header('kept', dir, 100), header('gone', dir, 200)] })
++    const workspace = result.registry.list()[0]!
++
++    await result.registry.archiveSession(SessionId('kept'))
++    await result.registry.archiveSession(SessionId('gone'))
++    expect(result.registry.archivedSessionIds).toEqual(['kept', 'gone'])
++
++    await result.registry.unarchiveSession(SessionId('gone'))
++    expect(result.registry.archivedSessionIds).toEqual(['kept'])
++    expect(workspace.sessionIds).toContain('gone')
++    expect(storedState(result.pool).archivedSessionIds).toEqual(['kept'])
++    const changesAfterFirst = result.changes.filter(change => change.table === '').length
++
++    // Idempotent/stays silent: repeats earn no extra write and no extra media event.
++    await result.registry.unarchiveSession(SessionId('gone'))
++    await result.registry.unarchiveSession(SessionId('never-rowed'))
++    expect(result.registry.archivedSessionIds).toEqual(['kept'])
++    expect(result.changes.filter(change => change.table === '').length).toBe(changesAfterFirst)
++
++    await result.registry.unarchiveSession(SessionId('kept'))
++    expect(result.registry.archivedSessionIds).toEqual([])
++    expect(storedState(result.pool).archivedSessionIds).toEqual([])
++  })
+ })

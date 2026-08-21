@@ -1,0 +1,78 @@
+[
+  {
+    "path": "AGENTS.md",
+    "sha256": "39225f2d4a6dc926fcb51861425f706f32f8172382bef48b86b103eaf96f9f6b"
+  },
+  {
+    "path": "host-patch.diff",
+    "sha256": "af4fd7c31d23ee54ee9ba3d4b3dad4f1255eaf55c2f3dbb14c0386b6bd7f76f5"
+  },
+  {
+    "path": "LICENSE.md",
+    "sha256": "8dbbab088d255735088d9424ea60651f860fe78d853127b2d0db0b76534e1548"
+  },
+  {
+    "path": "PATCH-APPLY.md",
+    "sha256": "16bc2c4944328445436de6e5f9a76726b4120f972035c5c53d68c8f976473b95"
+  },
+  {
+    "path": "plugin/client/index.mjs",
+    "sha256": "df186b0950202df85c66414325a0b1677a586296a45ee0c84ac2a744356273ff"
+  },
+  {
+    "path": "plugin/client/rows.mjs",
+    "sha256": "080cc1d5e971b1367835d3a7eca9fc95e619838a66db4175d13fabe5f5bcaf26"
+  },
+  {
+    "path": "plugin/client/style.mjs",
+    "sha256": "4e8ee9912f9a5b7c563a081b01902563f136b5d9442247c378ec288362fd063d"
+  },
+  {
+    "path": "plugin/client.js",
+    "sha256": "d5aa002648a49205ece9a9a5042982080270b9ae23a2aa592ca740fb7467272a"
+  },
+  {
+    "path": "plugin/cordis.patch.yml",
+    "sha256": "a198943be2adc7e05fc9a6684714453a0563dc4eb05fcc45dff0f96dbb969ec3"
+  },
+  {
+    "path": "plugin/HANDOVER.md",
+    "sha256": "0f6c64d294b090d5608f34f844d39e343df0128da5d0a8027b22c10185151a58"
+  },
+  {
+    "path": "plugin/index.mjs",
+    "sha256": "50b7bcd140c25d31f92900fe6493f246ce015261e2a5ab8ee484107686f71a68"
+  },
+  {
+    "path": "plugin/package.json",
+    "sha256": "dbdea34f59a6cc14dfae9e536096861bba13ce45c0bc97b666ea4089046e8bed"
+  },
+  {
+    "path": "plugin/README.md",
+    "sha256": "375d1fd1a408b891d17ec713a312102ef9cb37db70fd839df391a98461952b79"
+  },
+  {
+    "path": "plugin/scripts/build-client.mjs",
+    "sha256": "543c26bf97c1aef37c128e366617e06e2976c1b8cdde576f9e96087cdb648253"
+  },
+  {
+    "path": "plugin/tests/run.mjs",
+    "sha256": "afec54231f7d370e7561448e266b8bafc9370cbb14736af12a401516e2468987"
+  },
+  {
+    "path": "README.md",
+    "sha256": "0468a1792e80131e02dc12c2314425522c80db0191c58cbc6074f407b6919dfd"
+  },
+  {
+    "path": "scripts/setup.mjs",
+    "sha256": "036480fda11c4cf61a73549d998f849b16d344ce5ff4793694c940fd08f5099d"
+  },
+  {
+    "path": "scripts/verify-manifest.mjs",
+    "sha256": "81b4753621a2dede54d8d2b738d952273007ac50ff8555a3f870e855826427cc"
+  },
+  {
+    "path": "UPSTREAM.md",
+    "sha256": "c1288e554c9462706816e979472ffdae8f7d74275a67c6e38d6381403abd3bea"
+  }
+]
