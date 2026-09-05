@@ -1,0 +1,68 @@
+{
+  "provider": "ustc",
+  "providers": {
+    "openai": {
+      "api": "openai",
+      "base_url": "https://api.openai.com/v1",
+      "api_key": "",
+      "model": "gpt-4o-mini",
+      "name": "OpenAI"
+    },
+    "anthropic": {
+      "api": "anthropic",
+      "base_url": "https://api.anthropic.com",
+      "api_key": "",
+      "model": "claude-sonnet-4-5",
+      "name": "Anthropic"
+    },
+    "deepseek": {
+      "api": "openai",
+      "base_url": "https://api.deepseek.com/v1",
+      "api_key": "",
+      "model": "deepseek-chat",
+      "name": "DeepSeek 官方"
+    },
+    "zhipu": {
+      "api": "openai",
+      "base_url": "https://open.bigmodel.cn/api/paas/v4",
+      "api_key": "",
+      "model": "glm-4.7-flash",
+      "name": "智谱 GLM"
+    },
+    "moonshot": {
+      "api": "openai",
+      "base_url": "https://api.moonshot.cn/v1",
+      "api_key": "",
+      "model": "kimi-k2.5",
+      "name": "月之暗面 Kimi"
+    },
+    "ustc": {
+      "api": "openai",
+      "base_url": "https://api.llm.ustc.edu.cn/v1",
+      "api_key": "",
+      "model": "deepseek-v4-flash-ascend",
+      "name": "科大 USTC"
+    },
+    "custom": {
+      "api": "openai",
+      "base_url": "",
+      "api_key": "",
+      "model": "",
+      "name": "自定义 (OpenAI 兼容)"
+    },
+    "": {
+      "api": "openai",
+      "base_url": "https://api.llm.ustc.edu.cn/",
+      "model": "glm-5.2-107",
+      "api_key": ""
+    }
+  },
+  "timeout": 180,
+  "max_tokens": 2000,
+  "bsk_path": "",
+  "bsk_home": "",
+  "feature_token": "",
+  "scroll_pause_ms": 1500,
+  "_说明": "who_are_you 配置文件。provider: 当前使用的厂商 key (见 providers); providers: 厂商预设列表, 可自由编辑或添加。每个厂商: api(openai或anthropic规范)/base_url/api_key/model。",
+  "max_articles": 200
+}
