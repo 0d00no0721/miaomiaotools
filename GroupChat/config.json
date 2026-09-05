@@ -1,0 +1,28 @@
+{
+  "_说明": "AI群聊配置文件。修改后保存并重启程序生效，也可在网页「设置」里改。active_provider: 当前激活供应商 id（预设见 providers.py，自定义见 custom_providers）；custom_providers: 自定义供应商列表；provider_settings: 每供应商的 base_url/api_key/model 覆盖，切换时各自保留；temperature: 随机性 0~1；max_tokens: 单次回复上限；timeout: 请求超时秒数；max_retries: 调用失败重试次数；max_rounds: 每次讨论最大轮数（达到后自动生成纪要收尾）；order_by_llm: true=每轮由模型定发言顺序（失败降级随机）；history_limit: 发给 AI 的上下文条数上限（0=全部）；summary_max_chars: 纪要字数上限；port: 后台服务端口（默认 8765）；auto_open_browser: 启动时自动打开浏览器。",
+  "active_provider": "ustc",
+  "custom_providers": [],
+  "provider_settings": {
+    "ustc": {
+      "base_url": "https://api.llm.ustc.edu.cn/v1",
+      "api_key": "",
+      "model": "deepseek-v4-pro"
+    }
+  },
+  "temperature": 0.5,
+  "max_tokens": 1024,
+  "timeout": 120,
+  "max_retries": 2,
+  "max_rounds": 15,
+  "order_by_llm": true,
+  "history_limit": 0,
+  "summary_max_chars": 400,
+  "port": 8773,
+  "auto_open_browser": false,
+  "provider": "openai",
+  "base_url": "https://api.llm.ustc.edu.cn/v1",
+  "api_key": "",
+  "model": "qwen3.6-chat",
+  "search_enabled": true,
+  "search_max_results": 5
+}
