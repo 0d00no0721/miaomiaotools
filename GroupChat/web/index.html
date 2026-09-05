@@ -1,0 +1,710 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI 群聊</title>
+<style>
+:root{
+  --bg:#f4f5f7; --panel:#ffffff; --border:#e8e9ec; --accent:#4d6bfe;
+  --accent-soft:#eef1fe; --text:#1a1a1a; --muted:#8a8a8e;
+  --code-bg:#f0f0f2; --sep:#c8c8cc;
+  --shadow-sm:0 1px 2px rgba(16,24,40,.04);
+  --shadow-md:0 2px 8px rgba(16,24,40,.06);
+  --shadow-lg:0 8px 24px rgba(16,24,40,.10);
+}
+.dark{
+  --bg:#141416; --panel:#1e1e21; --border:#2e2e33; --accent:#6d8bff;
+  --accent-soft:#23283d; --text:#e1e1e3; --muted:#8a8a8e;
+  --code-bg:#2a2a2e; --sep:#444448;
+  --shadow-sm:0 1px 2px rgba(0,0,0,.3);
+  --shadow-md:0 2px 8px rgba(0,0,0,.35);
+  --shadow-lg:0 8px 24px rgba(0,0,0,.45);
+}
+*{box-sizing:border-box; margin:0; padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif; background:var(--bg); color:var(--text); font-size:15px; line-height:1.7; height:100vh; display:flex; flex-direction:column}
+button{font-family:inherit; font-size:14px; padding:6px 14px; border:1px solid var(--border); background:var(--panel); color:var(--text); border-radius:8px; cursor:pointer; transition:all .18s ease; box-shadow:var(--shadow-sm)}
+button:hover{border-color:var(--accent); color:var(--accent); background:var(--accent-soft)}
+button:disabled{opacity:.4; cursor:not-allowed; border-color:var(--border); color:var(--muted); background:var(--panel); box-shadow:none}
+button.primary{background:var(--accent); color:#fff; border-color:var(--accent); box-shadow:0 2px 6px rgba(77,107,254,.3)}
+button.primary:hover{opacity:.92; color:#fff; background:var(--accent)}
+button.danger{color:#c0392b; border-color:#e8c4c0}
+button.danger:hover{background:#fdf1f0; border-color:#c0392b; color:#c0392b; box-shadow:var(--shadow-sm)}
+.dark button.danger{color:#e88a84; border-color:#4a3231}
+.dark button.danger:hover{background:#332423; border-color:#e88a84; color:#e88a84}
+
+/* 空状态 */
+.empty-state{display:flex; flex-direction:column; align-items:center; justify-content:center; padding:60px 20px; color:var(--muted); text-align:center}
+.empty-state .icon{font-size:44px; margin-bottom:12px; opacity:.55}
+.empty-state .title{font-size:15px; font-weight:600; color:var(--text); margin-bottom:6px}
+.empty-state .desc{font-size:13px; max-width:360px; line-height:1.8}
+input,textarea{font-family:inherit; font-size:14px; padding:7px 10px; border:1px solid var(--border); border-radius:8px; background:var(--panel); color:var(--text); outline:none; transition:border-color .18s, box-shadow .18s}
+input:focus,textarea:focus{border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft)}
+
+/* 滚动条 */
+::-webkit-scrollbar{width:8px; height:8px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--border); border-radius:4px}
+::-webkit-scrollbar-thumb:hover{background:var(--muted)}
+
+/* 顶栏 */
+.topbar{display:flex; align-items:center; gap:8px; padding:10px 16px; background:var(--panel); border-bottom:1px solid var(--border); flex-shrink:0; box-shadow:var(--shadow-sm); z-index:10}
+.topbar .topic{color:var(--text); font-size:13px; max-width:300px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; background:var(--accent-soft); padding:3px 10px; border-radius:12px; font-weight:500}
+.topbar .status{color:var(--muted); font-size:13px; flex:1; text-align:center; display:flex; align-items:center; justify-content:center; gap:7px}
+.topbar .status .pulse{display:none; width:8px; height:8px; border-radius:50%; background:#27ae60; animation:pulse 1.2s ease-in-out infinite}
+.topbar .status.running .pulse{display:inline-block}
+@keyframes pulse{0%,100%{opacity:1; transform:scale(1)} 50%{opacity:.35; transform:scale(.8)}}
+.topbar .status.running{color:var(--text)}
+.topbar .round{color:var(--muted); font-size:12px; min-width:86px; text-align:right; background:var(--bg); padding:3px 10px; border-radius:12px; border:1px solid var(--border)}
+.topbar .spacer{flex:1}
+
+/* 主体 */
+.main{display:flex; flex:1; overflow:hidden}
+.sidebar{width:200px; background:var(--panel); border-right:1px solid var(--border); padding:12px; overflow-y:auto; flex-shrink:0}
+.sidebar h3{font-size:12px; color:var(--muted); margin-bottom:8px; font-weight:600; letter-spacing:.5px; text-transform:uppercase}
+.sidebar .section{background:var(--bg); border-radius:10px; padding:10px; margin-bottom:10px; border:1px solid transparent}
+.dark .sidebar .section{border-color:var(--border)}
+.member-item{display:flex; align-items:center; gap:6px; padding:5px 6px; border-radius:8px; cursor:pointer; margin-bottom:2px; transition:background .15s}
+.member-item:hover{background:var(--bg)}
+.member-item.selected{background:var(--accent-soft)}
+.member-dot{width:12px; height:12px; border-radius:50%; flex-shrink:0; box-shadow:inset 0 0 0 1px rgba(0,0,0,.06)}
+.member-name{font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.sidebar .btn-row{display:flex; gap:4px; margin-top:6px}
+.sidebar .btn-row button{flex:1; font-size:12px; padding:5px 4px}
+.sidebar select{width:100%; padding:5px 8px; margin-top:8px; border:1px solid var(--border); border-radius:8px; background:var(--panel); color:var(--text); font-size:13px; cursor:pointer}
+
+/* 聊天区 */
+.chat-area{flex:1; display:flex; flex-direction:column; overflow:hidden}
+.chat-box{flex:1; overflow-y:auto; padding:20px 24px; scroll-behavior:smooth; background:
+  linear-gradient(180deg, var(--bg) 0%, var(--bg) 100%)}
+.msg-ai{margin-bottom:16px; max-width:82%; animation:msgIn .25s ease}
+@keyframes msgIn{from{opacity:0; transform:translateY(6px)} to{opacity:1; transform:none}}
+.msg-ai .name{font-weight:600; font-size:13px; margin-bottom:4px; display:flex; align-items:center; gap:6px}
+.msg-ai .avatar{width:22px; height:22px; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; font-size:11px; color:#fff; flex-shrink:0; font-weight:700}
+.msg-ai .body{font-size:15px; line-height:1.75; word-wrap:break-word; background:var(--panel); border:1px solid var(--border); border-radius:4px 14px 14px 14px; padding:10px 14px; box-shadow:var(--shadow-sm)}
+.msg-user{display:flex; justify-content:flex-end; margin-bottom:16px; animation:msgIn .25s ease}
+.msg-user .bubble{background:linear-gradient(135deg, var(--accent), #6a85ff); color:#fff; padding:9px 15px; border-radius:14px 4px 14px 14px; max-width:70%; word-wrap:break-word; box-shadow:0 2px 8px rgba(77,107,254,.25)}
+.msg-notice{color:var(--muted); font-size:13px; text-align:center; margin:10px 0; font-style:italic}
+.msg-sep{text-align:center; color:var(--sep); font-size:13px; margin:18px 0; position:relative}
+.msg-sep::before,.msg-sep::after{content:""; position:absolute; top:50%; width:30%; height:1px; background:var(--sep)}
+.msg-sep::before{left:0}.msg-sep::after{right:0}
+.msg-summary{border:1px solid var(--border); border-radius:12px; padding:14px 16px; margin:18px 0; background:var(--panel); box-shadow:var(--shadow-md); animation:msgIn .25s ease}
+.msg-summary .title{font-weight:600; color:var(--accent); margin-bottom:6px; text-align:center}
+.msg-summary .body{font-size:14px; line-height:1.8}
+.msg-summary .body h3{font-size:14px; margin:8px 0 4px}
+.msg-summary .body ul,.msg-summary .body ol{margin:4px 0 4px 20px}
+.msg-summary .body li{margin:2px 0}
+
+/* markdown 渲染 */
+.body h1,.body h2,.body h3{margin:8px 0 4px; line-height:1.4}
+.body h1{font-size:18px}.body h2{font-size:16px}.body h3{font-size:15px}
+.body p{margin:4px 0}
+.body ul,.body ol{margin:4px 0 4px 22px}
+.body li{margin:2px 0}
+.body code{background:var(--code-bg); padding:1px 5px; border-radius:4px; font-family:"SF Mono",Consolas,monospace; font-size:13px}
+.body pre{background:var(--code-bg); padding:10px 12px; border-radius:8px; overflow-x:auto; margin:6px 0}
+.body pre code{background:none; padding:0}
+.body blockquote{border-left:3px solid var(--accent); padding-left:12px; color:var(--muted); margin:6px 0}
+.body a{color:var(--accent)}
+.body strong{font-weight:600}
+
+/* 底栏 */
+.bottombar{display:flex; gap:8px; padding:10px 16px; background:var(--panel); border-top:1px solid var(--border); flex-shrink:0; box-shadow:0 -1px 2px rgba(16,24,40,.03)}
+.bottombar input{flex:1; padding:9px 14px; border-radius:10px; line-height:1.5}
+.bottombar .hint{color:var(--muted); font-size:12px; margin-right:6px; align-self:center}
+
+/* 模态 */
+.modal-mask{display:none; position:fixed; inset:0; background:rgba(0,0,0,.45); z-index:100; align-items:center; justify-content:center; backdrop-filter:blur(2px)}
+.modal-mask.show{display:flex}
+.modal{background:var(--panel); border-radius:16px; padding:20px 24px; min-width:380px; max-width:560px; max-height:85vh; overflow-y:auto; box-shadow:var(--shadow-lg); animation:modalIn .2s ease}
+@keyframes modalIn{from{opacity:0; transform:scale(.97)} to{opacity:1; transform:none}}
+.modal h2{font-size:17px; margin-bottom:14px}
+.modal .field{margin-bottom:12px}
+.modal .field label{display:block; font-size:13px; color:var(--muted); margin-bottom:4px}
+.modal .field input,.modal .field textarea{width:100%}
+.modal .field textarea{height:90px; resize:vertical; line-height:1.6}
+.modal .actions{display:flex; justify-content:flex-end; gap:8px; margin-top:16px}
+.modal .row{display:flex; gap:8px}
+.modal .row .field{flex:1}
+.list-item{display:flex; align-items:center; justify-content:space-between; padding:8px 10px; border:1px solid var(--border); border-radius:8px; margin-bottom:6px; cursor:pointer; transition:border-color .15s}
+.list-item:hover{border-color:var(--accent)}
+.color-pick{display:flex; gap:4px; flex-wrap:wrap; margin-top:4px}
+.color-pick span{width:22px; height:22px; border-radius:50%; cursor:pointer; border:2px solid transparent; transition:transform .12s}
+.color-pick span:hover{transform:scale(1.12)}
+.color-pick span.sel{border-color:var(--accent)}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <span class="topic" id="topic">（发送第一条消息作为主题）</span>
+  <button onclick="UI.editTopic()" style="padding:3px 8px;font-size:12px">✎</button>
+  <span class="status" id="status"><span class="pulse"></span><span id="status-text">就绪</span></span>
+  <span class="spacer"></span>
+  <span class="round" id="round">已协调 0 次</span>
+  <button id="btn-summary" onclick="UI.summary()" disabled>生成纪要</button>
+  <button id="btn-stop" onclick="UI.stop()" disabled class="danger">停止</button>
+  <button onclick="UI.toggleTheme()" style="padding:3px 8px;font-size:16px;border:none;box-shadow:none" id="theme-btn" title="切换明暗主题">🌙</button>
+</div>
+
+<div class="main">
+  <div class="sidebar">
+    <h3 id="member-head">群成员 (0/8)</h3>
+    <div id="member-list"></div>
+    <div class="btn-row">
+      <button onclick="UI.editMember(null)">添加</button>
+      <button onclick="UI.editSelected()">编辑</button>
+      <button onclick="UI.deleteSelected()">删除</button>
+    </div>
+    <h3 style="margin-top:16px">预设组</h3>
+    <select id="preset-sel" onchange="UI.applyPreset(this.value)"></select>
+    <h3 style="margin-top:16px">会话</h3>
+    <div class="btn-row">
+      <button onclick="UI.openHistory()">历史</button>
+      <button onclick="UI.newSession()">新建</button>
+    </div>
+    <div class="btn-row" style="margin-top:4px">
+      <button onclick="UI.openSettings()">设置</button>
+      <button onclick="UI.exportMd()">导出MD</button>
+      <button onclick="UI.exportHtml()">导出HTML</button>
+    </div>
+  </div>
+
+  <div class="chat-area">
+    <div class="chat-box" id="chat-box"></div>
+    <div class="bottombar">
+      <span class="hint" id="hint"></span>
+      <input id="input" placeholder="输入消息发起讨论（用 @名字 点名）…" onkeydown="if(event.key==='Enter')UI.send()">
+      <button class="primary" id="btn-send" onclick="UI.send()">发送</button>
+    </div>
+  </div>
+</div>
+
+<!-- 成员编辑模态 -->
+<div class="modal-mask" id="modal-member">
+  <div class="modal">
+    <h2 id="member-modal-title">添加成员</h2>
+    <div class="field"><label>名字</label><input id="m-name"></div>
+    <div class="field"><label>颜色</label><input id="m-color" style="width:120px">
+      <div class="color-pick" id="color-pick"></div>
+    </div>
+    <div class="field"><label>人设</label><textarea id="m-persona"></textarea></div>
+    <div class="actions">
+      <button onclick="UI.closeModal('modal-member')">取消</button>
+      <button class="primary" id="m-save" onclick="UI.saveMember()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 历史模态 -->
+<div class="modal-mask" id="modal-history">
+  <div class="modal">
+    <h2>历史会话</h2>
+    <div id="history-list"></div>
+    <div class="actions"><button onclick="UI.closeModal('modal-history')">关闭</button></div>
+  </div>
+</div>
+
+<!-- 设置模态 -->
+<div class="modal-mask" id="modal-settings">
+  <div class="modal">
+    <h2>设置</h2>
+    <h3 style="font-size:14px;margin:0 0 10px;color:var(--accent)">供应商</h3>
+    <div class="row">
+      <div class="field" style="flex:2">
+        <label>供应商（选择后自动填参数）</label>
+        <select id="p-sel" onchange="UI.onProviderSelect(this.value)" style="width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:7px;background:var(--panel);color:var(--text)"></select>
+      </div>
+      <div class="field" style="flex:1">
+        <label>操作</label>
+        <div class="row">
+          <button style="flex:1" onclick="UI.discoverModels()">拉模型</button>
+          <button style="flex:1" onclick="UI.deleteProvider()">删除</button>
+        </div>
+      </div>
+    </div>
+    <div class="row">
+      <div class="field"><label>名称</label><input id="p-name"></div>
+      <div class="field"><label>规范</label>
+        <select id="p-api" style="width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:7px;background:var(--panel);color:var(--text)">
+          <option value="openai">openai</option>
+          <option value="anthropic">anthropic</option>
+        </select>
+      </div>
+    </div>
+    <div class="field"><label>接口地址</label><input id="p-baseurl" placeholder="https://..."></div>
+    <div class="field"><label>密钥 <span id="p-keymask" style="color:var(--muted)"></span> <a id="p-keyurl" href="#" target="_blank" style="font-size:12px;color:var(--accent);display:none">获取密钥 ↗</a></label><input id="p-apikey" type="password" placeholder="留空 = 不修改已存密钥"></div>
+    <div class="field">
+      <label>模型</label>
+      <div class="row">
+        <input id="p-model" style="flex:1" placeholder="模型名，可手动填写">
+        <select id="p-model-sel" onchange="if(this.value)document.getElementById('p-model').value=this.value" style="flex:1;padding:7px 10px;border:1px solid var(--border);border-radius:7px;background:var(--panel);color:var(--text)"><option value="">-- 常见模型 --</option></select>
+      </div>
+    </div>
+    <div class="actions" style="margin-top:8px">
+      <span id="p-active-tag" style="align-self:center;font-size:12px;color:var(--accent)"></span>
+      <button class="primary" onclick="UI.saveProvider()">保存并激活</button>
+    </div>
+    <h3 style="font-size:14px;margin:16px 0 10px;color:var(--accent)">讨论参数（全局）</h3>
+    <div class="row">
+      <div class="field"><label>随机性</label><input id="s-temp"></div>
+      <div class="field"><label>回复上限</label><input id="s-maxtokens"></div>
+      <div class="field"><label>超时秒</label><input id="s-timeout"></div>
+    </div>
+    <div class="row">
+      <div class="field"><label>重试次数</label><input id="s-retries"></div>
+      <div class="field"><label>最大协调次数</label><input id="s-maxrounds"></div>
+      <div class="field"><label>纪要字数</label><input id="s-summarychars"></div>
+    </div>
+    <div class="row">
+      <div class="field"><label>上下文条数(0=全部)</label><input id="s-histlimit"></div>
+      <div class="field"><label>端口</label><input id="s-port"></div>
+    </div>
+    <div class="field"><label><input type="checkbox" id="s-order"> 每轮由模型定发言顺序（失败降级随机）</label></div>
+    <div class="field"><label><input type="checkbox" id="s-search"> 联网搜索（成员可用 [SEARCH: 关键词] 搜索实时信息）</label></div>
+    <div class="field"><label><input type="checkbox" id="s-browser"> 启动时自动打开浏览器</label></div>
+    <div class="actions">
+      <button onclick="UI.closeModal('modal-settings')">取消</button>
+      <button class="primary" onclick="UI.saveSettings()">保存参数</button>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+// HTML 转义必须字符串拼接，否则某些工具会解码实体（工作区已知陷阱）
+function esc(s){return (s||"").replace(/&/g,("&a"+"mp;")).replace(/</g,("&l"+"t;")).replace(/>/g,("&g"+"t;")).replace(/"/g,("&q"+"uot;"))}
+
+// 零依赖 Markdown 渲染（移植自 dialog_creater，约 40 行）
+function renderMD(src){
+  if(!src)return "";
+  var lines=(src||"").split("\n"), out=[], inCode=false, inList=false, inOl=false;
+  function inline(t){
+    t=esc(t);
+    t=t.replace(/`([^`]+)`/g,function(_,c){return "<code>"+c+"</code>"});
+    t=t.replace(/\*\*([^*]+)\*\*/g,"<strong>$1</strong>");
+    t=t.replace(/\*([^*]+)\*/g,"<em>$1</em>");
+    t=t.replace(/\[([^\]]+)\]\(([^)]+)\)/g,'<a href="$2" target="_blank">$1</a>');
+    return t;
+  }
+  for(var i=0;i<lines.length;i++){
+    var line=lines[i];
+    if(/^```/.test(line)){if(inCode){out.push("</code></pre>");inCode=false}else{out.push("<pre><code>");inCode=true}continue}
+    if(inCode){out.push(esc(line));continue}
+    if(/^\s*#{1,3}\s/.test(line)){if(inList){out.push("</ul>");inList=false}if(inOl){out.push("</ol>");inOl=false}var h=line.match(/^#{1,3}/)[0].length;out.push("<h"+h+">"+inline(line.replace(/^#{1,3}\s*/,""))+"</h"+h+">");continue}
+    if(/^\s*[-*]\s/.test(line)){if(!inList){out.push("<ul>");inList=true}out.push("<li>"+inline(line.replace(/^\s*[-*]\s*/,""))+"</li>");continue}
+    if(/^\s*\d+\.\s/.test(line)){if(!inOl){out.push("<ol>");inOl=true}out.push("<li>"+inline(line.replace(/^\s*\d+\.\s*/,""))+"</li>");continue}
+    if(line.trim()===""){if(inList){out.push("</ul>");inList=false}if(inOl){out.push("</ol>");inOl=false}continue}
+    if(inList){out.push("</ul>");inList=false}if(inOl){out.push("</ol>");inOl=false}
+    if(/^>\s/.test(line)){out.push("<blockquote>"+inline(line.replace(/^>\s*/,""))+"</blockquote>");continue}
+    out.push("<p>"+inline(line)+"</p>");
+  }
+  if(inList)out.push("</ul>");if(inOl)out.push("</ol>");if(inCode)out.push("</code></pre>");
+  return out.join("");
+}
+
+var UI={
+  lastI:0, members:[], selectedMember:null, editingOld:null, state:"idle",
+  COLORS:["#C0392B","#E67E22","#F39C12","#27AE60","#1ABC9C","#2471A3","#7D3C98","#B7950B","#117864","#A93226"],
+
+  init:function(){
+    // 主题
+    var t=localStorage.getItem("gc-theme")||"";
+    if(t==="dark"){document.body.classList.add("dark");document.getElementById("theme-btn").textContent="☀"}
+    this.renderColorPick();
+    this.loadPresets();
+    this.poll();
+  },
+
+  // ---------- 轮询 ----------
+  poll:function(){
+    var self=this;
+    fetch("/api/state?since="+this.lastI).then(function(r){return r.json()}).then(function(s){
+      self.state=s.state;
+      self.members=s.members||[];
+      document.getElementById("topic").textContent=s.topic||"（发送第一条消息作为主题）";
+      document.getElementById("status-text").textContent=s.status||"";
+      var statusEl=document.getElementById("status");
+      if(s.state==="running"){statusEl.classList.add("running")}else{statusEl.classList.remove("running")}
+      document.getElementById("round").textContent="已协调 "+(s.admin_turns||0)+"/"+s.max_rounds+" 次";
+      self.renderMembers();
+      (s.messages||[]).forEach(function(m){self.renderMsg(m);self.lastI=Math.max(self.lastI,m.i)});
+      self.updateEmptyState();
+      self.updateButtons();
+    }).catch(function(){}).finally(function(){setTimeout(function(){self.poll()},700)});
+  },
+
+  updateButtons:function(){
+    var running=this.state==="running";
+    document.getElementById("btn-stop").disabled=!running;
+    document.getElementById("btn-send").disabled=false;
+    document.getElementById("btn-summary").disabled=running||!this.members.length;
+    var inp=document.getElementById("input");
+    inp.disabled=false;
+    inp.placeholder=running?"输入消息插话（群管理员会转达给成员）…":"输入消息发起讨论（用 @名字 点名）…";
+    document.getElementById("hint").textContent=running?"":"";
+  },
+
+  // ---------- 渲染 ----------
+  renderMembers:function(){
+    var head=document.getElementById("member-head");
+    head.textContent="群成员 ("+this.members.length+"/8)";
+    var box=document.getElementById("member-list");
+    box.innerHTML="";
+    var self=this;
+    this.members.forEach(function(m){
+      var d=document.createElement("div");
+      d.className="member-item"+(m.name===self.selectedMember?" selected":"");
+      d.innerHTML='<div class="member-dot" style="background:'+m.color+'"></div><div class="member-name">'+esc(m.name)+'</div>';
+      d.onclick=function(){self.selectedMember=m.name;self.renderMembers()};
+      box.appendChild(d);
+    });
+  },
+
+  renderMsg:function(m){
+    var box=document.getElementById("chat-box");
+    var nearBottom=box.scrollHeight-box.scrollTop-box.clientHeight<120;
+    var div=document.createElement("div");
+    if(m.type==="user"){
+      div.className="msg-user";
+      div.innerHTML='<div class="bubble">'+esc(m.content)+'</div>';
+    }else if(m.type==="ai"){
+      div.className="msg-ai";
+      var color,tag="",avatarChar="";
+      if(m.sender==="群管理员"){color="#B8860B";avatarChar="管";tag='<span style="font-size:11px;background:#B8860B;color:#fff;padding:1px 6px;border-radius:4px">管理员</span>'}
+      else{color=m.sender?this.memberColor(m.sender):"#888";avatarChar=(m.sender||"?").charAt(0)}
+      var html='<div class="name" style="color:'+color+'">'
+        +'<span class="avatar" style="background:'+color+'">'+esc(avatarChar)+'</span>'
+        +esc(m.sender)+tag+'</div>'
+        +'<div class="body">'+renderMD(m.content)+'</div>';
+      if(m.files&&m.files.length){
+        html+='<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px">'
+        m.files.forEach(function(f){
+          var icon=f.ext==="html"?"🌐":f.ext==="csv"?"📊":"📄"
+          var sizeKB=Math.round(f.size/1024*10)/10
+          html+='<div style="border:1px solid var(--border);border-radius:10px;padding:8px 12px;display:flex;align-items:center;gap:8px;background:var(--panel);box-shadow:var(--shadow-sm)">'
+          html+='<span style="font-size:20px">'+icon+'</span>'
+          html+='<div><div style="font-size:13px;font-weight:600">'+esc(f.name)+'</div>'
+          html+='<div style="font-size:11px;color:var(--muted)">'+sizeKB+'KB</div></div>'
+          html+='<a href="/api/files/'+encodeURIComponent(f.id)+'" download style="font-size:12px;padding:3px 8px;border:1px solid var(--border);border-radius:6px;text-decoration:none;color:var(--text)">下载</a>'
+          html+='<button onclick="window.open(\'/api/files/'+encodeURIComponent(f.id)+'/preview\')" style="font-size:12px;padding:3px 8px">预览</button>'
+          html+='</div>'
+        })
+        html+='</div>'
+      }
+      div.innerHTML=html;
+    }else if(m.type==="notice"){
+      div.className="msg-notice";
+      div.textContent=m.content;
+    }else if(m.type==="summary"){
+      div.className="msg-summary";
+      div.innerHTML='<div class="title">会议纪要</div><div class="body">'+renderMD(m.content)+'</div>';
+    }
+    box.appendChild(div);
+    if(nearBottom)box.scrollTop=box.scrollHeight;
+    this.updateEmptyState();
+  },
+
+  updateEmptyState:function(){
+    var box=document.getElementById("chat-box");
+    var empty=box.querySelector(".empty-state");
+    var hasMsgs=box.querySelectorAll(".msg-ai,.msg-user,.msg-notice,.msg-summary,.msg-sep").length>0;
+    if(!hasMsgs&&!empty){
+      var d=document.createElement("div");
+      d.className="empty-state";
+      d.innerHTML='<div class="icon">💬</div>'
+        +'<div class="title">开始你的第一次 AI 群聊</div>'
+        +'<div class="desc">在下方输入任务或问题，群管理员会分解任务并指派成员协作完成。用 @名字 可以直接点名成员。</div>';
+      box.appendChild(d);
+    }else if(hasMsgs&&empty){
+      empty.remove();
+    }
+  },
+
+  memberColor:function(name){
+    for(var i=0;i<this.members.length;i++)if(this.members[i].name===name)return this.members[i].color;
+    return "#888";
+  },
+
+  // ---------- 操作 ----------
+  send:function(){
+    var inp=document.getElementById("input");
+    var text=inp.value.trim();
+    if(!text||this.state==="running")return;
+    inp.value="";
+    fetch("/api/send",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({text:text})});
+  },
+
+  stop:function(){fetch("/api/stop",{method:"POST"})},
+  summary:function(){fetch("/api/summary",{method:"POST"})},
+
+  editTopic:function(){
+    var cur=document.getElementById("topic").textContent;
+    if(cur.indexOf("（")===0)cur="";
+    var v=prompt("群聊主题：",cur);
+    if(v!==null)fetch("/api/topic",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({topic:v})});
+  },
+
+  // ---------- 成员管理 ----------
+  renderColorPick:function(){
+    var box=document.getElementById("color-pick");
+    box.innerHTML="";
+    var self=this;
+    this.COLORS.forEach(function(c){
+      var s=document.createElement("span");
+      s.style.background=c;
+      s.onclick=function(){
+        document.getElementById("m-color").value=c;
+        box.querySelectorAll("span").forEach(function(x){x.classList.remove("sel")});
+        s.classList.add("sel");
+      };
+      box.appendChild(s);
+    });
+  },
+
+  editMember:function(){
+    this.editingOld=null;
+    document.getElementById("member-modal-title").textContent="添加成员";
+    document.getElementById("m-name").value="";
+    document.getElementById("m-persona").value="";
+    document.getElementById("m-color").value="#2471A3";
+    this.showModal("modal-member");
+    document.getElementById("m-name").focus();
+  },
+
+  editSelected:function(){
+    if(!this.selectedMember){alert("请先在左侧选中一个成员");return}
+    var m=null;
+    for(var i=0;i<this.members.length;i++)if(this.members[i].name===this.selectedMember)m=this.members[i];
+    if(!m)return;
+    this.editingOld=m.name;
+    document.getElementById("member-modal-title").textContent="编辑成员";
+    document.getElementById("m-name").value=m.name;
+    document.getElementById("m-persona").value=m.persona||"";
+    document.getElementById("m-color").value=m.color||"#2471A3";
+    this.showModal("modal-member");
+  },
+
+  saveMember:function(){
+    var name=document.getElementById("m-name").value.trim();
+    var persona=document.getElementById("m-persona").value.trim();
+    var color=document.getElementById("m-color").value.trim()||"#2471A3";
+    if(!name){alert("名字不能为空");return}
+    var body={action:this.editingOld?"edit":"add",name:name,persona:persona,color:color};
+    if(this.editingOld)body.old_name=this.editingOld;
+    var self=this;
+    fetch("/api/members",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}).then(function(r){return r.json()}).then(function(r){
+      if(r.ok){self.closeModal("modal-member")}else{alert(r.error||"保存失败")}
+    });
+  },
+
+  deleteSelected:function(){
+    if(!this.selectedMember){alert("请先在左侧选中一个成员");return}
+    if(!confirm("确定删除成员「"+this.selectedMember+"」？"))return;
+    var self=this;
+    fetch("/api/members",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"delete",name:this.selectedMember})}).then(function(r){return r.json()}).then(function(r){
+      if(!r.ok)alert(r.error||"删除失败");
+      self.selectedMember=null;
+    });
+  },
+
+  loadPresets:function(){
+    var sel=document.getElementById("preset-sel");
+    sel.innerHTML='<option value="">-- 切换预设组 --</option>';
+    fetch("/api/presets").then(function(r){return r.json()}).then(function(d){
+      (d.groups||[]).forEach(function(g){var o=document.createElement("option");o.value=g;o.textContent=g;sel.appendChild(o)});
+    });
+  },
+
+  applyPreset:function(g){
+    if(!g)return;
+    if(!confirm("切换到预设组「"+g+"」？当前成员将被替换。")){document.getElementById("preset-sel").value="";return}
+    fetch("/api/members",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"preset",group:g})});
+    document.getElementById("preset-sel").value="";
+  },
+
+  // ---------- 历史 / 设置 / 导出 ----------
+  openHistory:function(){
+    var self=this;
+    fetch("/api/history").then(function(r){return r.json()}).then(function(d){
+      var box=document.getElementById("history-list");
+      box.innerHTML="";
+      (d.items||[]).forEach(function(it){
+        var d2=document.createElement("div");
+        d2.className="list-item";
+        d2.innerHTML='<span>'+esc(it.title)+'</span><button>打开</button>';
+        d2.querySelector("button").onclick=function(){
+          fetch("/api/history/open",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:it.name})}).then(function(r){return r.json()}).then(function(r){
+            if(r.ok){self.closeModal("modal-history");self.lastI=0;document.getElementById("chat-box").innerHTML=""}else{alert(r.error||"打开失败")}
+          });
+        };
+        box.appendChild(d2);
+      });
+      if(!d.items||!d.items.length)box.innerHTML='<p style="color:var(--muted)">还没有历史会话</p>';
+    });
+    this.showModal("modal-history");
+  },
+
+  newSession:function(){
+    if(!confirm("新建讨论？当前记录将自动保存。"))return;
+    var self=this;
+    fetch("/api/history/new",{method:"POST"}).then(function(r){return r.json()}).then(function(r){
+      if(r.ok){self.lastI=0;document.getElementById("chat-box").innerHTML=""}else{alert(r.error||"操作失败")}
+    });
+  },
+
+  exportMd:function(){window.location.href="/api/export?format=md"},
+  exportHtml:function(){window.location.href="/api/export?format=html"},
+
+  // ---------- 供应商管理 ----------
+  providerItems:[], providerActive:null,
+
+  openSettings:function(){
+    var self=this;
+    // 讨论参数（全局）
+    fetch("/api/config").then(function(r){return r.json()}).then(function(c){
+      document.getElementById("s-temp").value=c.temperature||0;
+      document.getElementById("s-maxtokens").value=c.max_tokens||1024;
+      document.getElementById("s-timeout").value=c.timeout||120;
+      document.getElementById("s-retries").value=c.max_retries||2;
+      document.getElementById("s-maxrounds").value=c.max_rounds||5;
+      document.getElementById("s-summarychars").value=c.summary_max_chars||400;
+      document.getElementById("s-histlimit").value=c.history_limit||0;
+      document.getElementById("s-port").value=c.port||8765;
+      document.getElementById("s-order").checked=!!c.order_by_llm;
+      document.getElementById("s-search").checked=!!c.search_enabled;
+      document.getElementById("s-browser").checked=!!c.auto_open_browser;
+    });
+    // 供应商目录
+    this.loadProviders();
+    this.showModal("modal-settings");
+  },
+
+  loadProviders:function(){
+    var self=this;
+    fetch("/api/providers").then(function(r){return r.json()}).then(function(d){
+      self.providerItems=d.items||[];
+      self.providerActive=d.active||"";
+      var sel=document.getElementById("p-sel");
+      sel.innerHTML="";
+      (d.items||[]).forEach(function(p){
+        var o=document.createElement("option");
+        o.value=p.id;
+        o.textContent=p.name+(p.id===d.active?"（当前）":"");
+        sel.appendChild(o);
+      });
+      var ids=(d.items||[]).map(function(p){return p.id});
+      var active=d.active&&ids.indexOf(d.active)>=0?d.active:(ids[0]||"");
+      if(active)self.onProviderSelect(active);
+    });
+  },
+
+  onProviderSelect:function(id){
+    var self=this;
+    var p=null;
+    this.providerItems.forEach(function(x){if(x.id===id)p=x});
+    if(!p)return;
+    document.getElementById("p-name").value=p.name;
+    document.getElementById("p-api").value=p.api||"openai";
+    document.getElementById("p-baseurl").value=p.base_url||"";
+    document.getElementById("p-apikey").value="";
+    document.getElementById("p-keymask").textContent=p.key_masked?("已存："+p.key_masked):"";
+    document.getElementById("p-model").value=p.model||"";
+    var ku=document.getElementById("p-keyurl");
+    if(p.key_url){ku.href=p.key_url;ku.style.display="inline"}else{ku.style.display="none"}
+    document.getElementById("p-active-tag").textContent=(id===this.providerActive)?"✓ 当前激活":"";
+    var ms=document.getElementById("p-model-sel");
+    ms.innerHTML='<option value="">-- 常见模型 --</option>';
+    (p.models||[]).forEach(function(m){var o=document.createElement("option");o.value=m;o.textContent=m;ms.appendChild(o)});
+  },
+
+  saveProvider:function(){
+    var id=document.getElementById("p-sel").value;
+    if(!id)return;
+    var isNew=(id==="custom"||this.providerItems.every(function(p){return p.id!==id}));
+    if(isNew&&id==="custom"){
+      var name=prompt("自定义供应商标识（字母/数字/-/_，最长32字符）：");
+      if(!name)return;
+      id=name.trim();
+      document.getElementById("p-name").value=document.getElementById("p-name").value.trim()||id;
+    }
+    var body={
+      action:"save", id:id,
+      name:document.getElementById("p-name").value.trim(),
+      api:document.getElementById("p-api").value,
+      base_url:document.getElementById("p-baseurl").value.trim(),
+      api_key:document.getElementById("p-apikey").value.trim(),
+      model:document.getElementById("p-model").value.trim(),
+    };
+    var self=this;
+    fetch("/api/providers",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}).then(function(r){return r.json()}).then(function(r){
+      if(r.ok){self.loadProviders();alert("已保存并激活供应商「"+body.name+"」")}
+      else{alert(r.error||"保存失败")}
+    });
+  },
+
+  deleteProvider:function(){
+    var id=document.getElementById("p-sel").value;
+    if(!id)return;
+    var p=null;
+    this.providerItems.forEach(function(x){if(x.id===id)p=x});
+    if(p&&p.preset){alert("预设供应商不可删除");return}
+    if(!confirm("确定删除供应商「"+(p?p.name:id)+"」？"))return;
+    var self=this;
+    fetch("/api/providers",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"delete",id:id})}).then(function(r){return r.json()}).then(function(r){
+      if(r.ok){self.loadProviders()}else{alert(r.error||"删除失败")}
+    });
+  },
+
+  discoverModels:function(){
+    var base_url=document.getElementById("p-baseurl").value.trim();
+    var api_key=document.getElementById("p-apikey").value.trim();
+    if(!base_url){alert("请先填写接口地址");return}
+    var ms=document.getElementById("p-model-sel");
+    ms.innerHTML='<option value="">-- 拉取中… --</option>';
+    var self=this;
+    fetch("/api/providers",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"discover",base_url:base_url,api_key:api_key})}).then(function(r){return r.json()}).then(function(r){
+      ms.innerHTML='<option value="">-- 常见模型 --</option>';
+      if(r.ok){
+        (r.models||[]).forEach(function(m){var o=document.createElement("option");o.value=m;o.textContent=m;ms.appendChild(o)});
+        if(!r.models.length){alert("未发现模型，请手动填写")}
+      }else{
+        alert(r.error||"拉取失败，请手动填写模型名");
+      }
+    });
+  },
+
+  saveSettings:function(){
+    var body={
+      temperature:parseFloat(document.getElementById("s-temp").value),
+      max_tokens:parseInt(document.getElementById("s-maxtokens").value),
+      timeout:parseInt(document.getElementById("s-timeout").value),
+      max_retries:parseInt(document.getElementById("s-retries").value),
+      max_rounds:parseInt(document.getElementById("s-maxrounds").value),
+      summary_max_chars:parseInt(document.getElementById("s-summarychars").value),
+      history_limit:parseInt(document.getElementById("s-histlimit").value),
+      port:parseInt(document.getElementById("s-port").value),
+      order_by_llm:document.getElementById("s-order").checked,
+      search_enabled:document.getElementById("s-search").checked,
+      auto_open_browser:document.getElementById("s-browser").checked,
+    };
+    var self=this;
+    fetch("/api/config",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}).then(function(r){return r.json()}).then(function(r){
+      if(r.ok){alert("参数已保存，部分项需重启生效")}else{alert(r.error||"保存失败")}
+    });
+  },
+
+  // ---------- 模态 / 主题 ----------
+  showModal:function(id){document.getElementById(id).classList.add("show")},
+  closeModal:function(id){document.getElementById(id).classList.remove("show")},
+  toggleTheme:function(){
+    var dark=document.body.classList.toggle("dark");
+    document.getElementById("theme-btn").textContent=dark?"☀":"🌙";
+    localStorage.setItem("gc-theme",dark?"dark":"light");
+  }
+};
+
+UI.init();
+</script>
+</body>
+</html>
